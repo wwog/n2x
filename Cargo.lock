@@ -121,6 +121,7 @@ name = "n2x-scheduler"
 version = "0.1.0"
 dependencies = [
  "log",
+ "n2x-kv",
  "thiserror",
 ]
 
