@@ -1,0 +1,6 @@
+[package]
+name = "n2x-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

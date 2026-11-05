@@ -1,0 +1,13 @@
+# rustfmt 配置 —— 由 Rust Forge 生成
+# 仅包含保守选项，不会改变代码语义。
+
+# 排版
+max_width = 100
+tab_spaces = 4
+hard_tabs = false
+
+# 换行启发式
+use_small_heuristics = "Default"
+
+# import 处理
+reorder_imports = true

@@ -1,0 +1,8 @@
+[package]
+name = "n2x-scheduler"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+log = { workspace = true }

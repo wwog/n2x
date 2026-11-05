@@ -1,0 +1,16 @@
+[workspace]
+members = ["crates/n2x-core", "crates/n2x-kv","crates/n2x-scheduler"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[workspace.dependencies]
+memmap2 = "^0.9.12"
+parking_lot = "^0.13.0"
+thiserror = "^2.0.21"
+crc32fast = "^1.5.4"
+log = "^0.4.35"
+serde = "^1.0.229"
+serde_json = "^1.0.154"
