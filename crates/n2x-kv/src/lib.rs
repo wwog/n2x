@@ -8,8 +8,6 @@
 //!   对应 sessionn2x-kv 的位置。字节形态是为了能直接扩展到导出层。
 //! - [`AnyStore`]：纯内存动态类型 KV，存 Rust 值而不编码，供内核内部使用。
 //!
-//! 本 crate 是基础 crate：不依赖 `engine`、不认识 Session、不做 FFI。
-//! 文件格式、恢复与压缩策略见 `ARCHITECTURE.md`。
 //!
 //! # 类型化读写
 //!
