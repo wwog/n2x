@@ -3,7 +3,7 @@ members = [
     "crates/n2x",
     "crates/n2x-core",
     "crates/n2x-kv",
-    "crates/n2x-scheduler",
+    "crates/n2x-runtime",
 ]
 resolver = "3"
 default-members = ["crates/n2x"]
@@ -16,9 +16,9 @@ repository = "https://github.com/wwog/n2x"
 
 [workspace.dependencies]
 n2x-kv = { path = "crates/n2x-kv" }
-n2x-core = { path = "crates/n2x-core" }
-n2x-scheduler = { path = "crates/n2x-scheduler" }
-#-
+n2x-core = { path = "crates/n2x-core", default-features = false }
+n2x-runtime = { path = "crates/n2x-runtime", default-features = false }
+
 memmap2 = "^0.9.12"
 parking_lot = "^0.13.0"
 thiserror = "^2.0.21"

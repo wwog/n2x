@@ -2,5 +2,16 @@
 name = "n2x-core"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Platform-independent migration models and sans-IO protocol"
+
+[features]
+default = ["serde"]
+serde = ["dep:serde"]
 
 [dependencies]
+serde = { workspace = true, features = ["derive"], optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true

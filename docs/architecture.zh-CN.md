@@ -1,6 +1,8 @@
 # n2x：统一迁移管线架构草案
 
-状态：设计推演，尚未实现。文中的 Rust 代码表达接口形状，不代表已经可以编译的 API。
+状态：分层已落实为 crate 结构、模型与端口契约；执行器尚未实现。本文保留设计推演，
+代码是概念示意，实际类型以 [模型契约](model.zh-CN.md)、源码 rustdoc 和
+[可编译示例](../crates/n2x-core/examples/manifest.rs) 为准。后续任务见 [实现清单](implementation.zh-CN.md)。
 
 目标：用一套可恢复的管线调度机处理存储迁移、结构升级和数据转换。框架提供标准调度、错误、进度、通知、恢复与运行工作区；应用提供存储适配和业务转换规则。
 
@@ -555,7 +557,7 @@ n2x-core
   plan/        版本图校验与计划编译
   engine/      sans-IO 执行与恢复状态机
 
-n2x-runtime   当前 n2x-scheduler 改名或由它重建
+n2x-runtime   已替代 n2x-scheduler，目前仅提供端口契约
   ports/       执行接口与能力描述
   registry/    Action 与端口注册
   driver/      Command 分发、计时、控制

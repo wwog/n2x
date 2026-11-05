@@ -102,12 +102,17 @@ dependencies = [
 name = "n2x"
 version = "0.1.0"
 dependencies = [
- "n2x-scheduler",
+ "n2x-core",
+ "n2x-runtime",
 ]
 
 [[package]]
 name = "n2x-core"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "n2x-kv"
@@ -124,12 +129,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "n2x-scheduler"
+name = "n2x-runtime"
 version = "0.1.0"
 dependencies = [
- "log",
+ "n2x-core",
  "n2x-kv",
- "thiserror",
 ]
 
 [[package]]
@@ -219,6 +223,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
 dependencies = [
  "serde_core",
+ "serde_derive",
 ]
 
 [[package]]

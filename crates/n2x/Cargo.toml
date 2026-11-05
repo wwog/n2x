@@ -4,6 +4,13 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+description = "Public facade for n2x migration models and runtime contracts"
+
+[features]
+default = ["serde"]
+serde = ["n2x-core/serde", "n2x-runtime/serde"]
+native-kv = ["n2x-runtime/native-kv"]
 
 [dependencies]
-n2x-scheduler = { workspace = true }
+n2x-core.workspace = true
+n2x-runtime.workspace = true
