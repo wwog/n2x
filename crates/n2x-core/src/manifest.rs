@@ -1,4 +1,3 @@
-mod schema_mode;
 
 use std::collections::HashMap;
 
@@ -12,10 +11,8 @@ pub struct Manifest {
     pub metadata: HashMap<String, String>,
 }
 
-
-
 pub struct Lifecycle {}
 
 pub enum Mode {
-    Schema(schema_mode::SchemaMode),
+    Schema(),
 }
