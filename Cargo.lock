@@ -99,6 +99,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "n2x"
+version = "0.1.0"
+dependencies = [
+ "n2x-scheduler",
+]
+
+[[package]]
 name = "n2x-core"
 version = "0.1.0"
 
