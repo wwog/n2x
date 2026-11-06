@@ -1,7 +1,7 @@
 //! n2x 的统一导出层。
 //!
-//! 当前提供已固定的模型与运行时契约。尚未提供 Runner、适配器或具体调度实现。
-//! 默认启用 serde；`native-kv` 可导出本地 KV，Web 使用者无需链接文件存储。
+//! 提供模型、sans-IO 调度与 Migrator 组合入口，不附带具体业务适配器。
+//! 默认启用 engine 和 native-kv；Web 可关闭默认功能并单独启用 engine。
 //!
 //! ```
 //! use n2x::{Manifest, Revision};
@@ -23,3 +23,5 @@ pub use n2x_core::*;
 
 /// 执行端口、异步调用与工作区接口。
 pub use n2x_runtime as runtime;
+#[cfg(feature = "engine")]
+pub use n2x_runtime::{Migrator, Registry, StateWorkspace};

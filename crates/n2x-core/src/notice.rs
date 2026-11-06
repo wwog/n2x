@@ -99,7 +99,7 @@ pub enum EventPage {
     },
 }
 
-/// 可靠订阅者的累计确认；表示该序号及此前事件均已处理。
+/// 可靠订阅的起点或累计确认；表示该序号及此前事件均已处理。
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct NoticeAck {

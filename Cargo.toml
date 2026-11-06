@@ -4,6 +4,7 @@ members = [
     "crates/n2x-core",
     "crates/n2x-kv",
     "crates/n2x-runtime",
+    "tests/migration-lab",
 ]
 resolver = "3"
 default-members = ["crates/n2x"]
@@ -26,3 +27,4 @@ crc32fast = "^1.5.4"
 log = "^0.4.35"
 serde = "^1.0.229"
 serde_json = "^1.0.154"
+sha2 = "0.10.9"

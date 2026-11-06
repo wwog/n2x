@@ -12,6 +12,8 @@ use crate::{Encoded, OperationId, RunId, ScopeId, StepAddress};
 pub struct ErrorCode(pub String);
 
 impl ErrorCode {
+    /// 请求旧版本，但没有声明反向迁移路径。
+    pub const ROLLBACK_UNSUPPORTED: &str = "n2x.version.rollback_unsupported";
     /// 恢复时发现计划或 Action 修订号发生变化。
     pub const PLAN_CHANGED: &str = "n2x.plan.changed";
     /// 多条路径之间无法唯一选择。

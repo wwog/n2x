@@ -1,7 +1,7 @@
 # 模型契约
 
 本文对应当前已编译的 Rust 类型。模型格式版本为 `n2x_core::MODEL_VERSION = 1`。
-具体调度和存储行为尚未实现；本文中的“必须”是后续实现需要遵守的协议。
+计划编译、调度及 KV 持久化已经实现；本文中的“必须”也是自定义端口的接入契约。
 
 ## 1. 标识与版本
 
@@ -47,8 +47,10 @@ RunRequest 指定 RunId、Scope、目标、路径和策略。initial 只用于�
 运行策略、模型格式和摘要。StepKind 与 StepContract 必须匹配。metadata 只做展示，
 已从计划类型剔除，不参与执行。Plan 中其余字段均应参与摘要。
 
-Digest 为 SHA-256，但规范编码与计算器尚未实现。不得把 Rust Hash、任意 JSON 输出或
-带凭证的连接字符串当作计划摘要。恢复不相容即拒绝，不静默改用新实现。
+Digest 为 SHA-256。`codec` 将模型序列化为递归键排序、无空白的 JSON UTF-8，
+Plan/Commit 排除自身 digest 字段；Encoded.bytes 保持不透明。Blob 按原始字节计算摘要。
+跨语言实现须匹配 Rust serde 的枚举、整数、Duration 和字节数组表达。
+不得把 Rust Hash 或带凭证的连接字符串当作摘要。恢复不相容即拒绝。
 
 ## 3. 数据、源视图与批次
 
@@ -152,7 +154,8 @@ ScopeState.active_run 与首次运行快照原子设置。暂停、失败或结�
 时才清除，清除动作同样与最终运行状态原子保存。
 
 A -> B -> C 在第二条边失败时，current 为 B，日志保留到 C 的部分执行。失败、暂停和
-取消均不表示回滚。存在未知操作时先 NeedsAttention，不能宣称安全取消。
+取消均不表示回滚。取消保留活动运行，可显式 Resume；存在未知操作时先
+NeedsAttention，不能宣称安全取消。
 
 SQLite user_version 等外部字段可作为 Task 更新并由 Check 验证。当前没有第二个独立
 StateStore 权威源；未来扩展需补齐版本端与工作区之间的对账协议。
@@ -174,12 +177,29 @@ Failed、Cancelled。RunSnapshot 区分 observed 与 confirmed。持久快照只
 - 事件 ID 为 RunId + sequence，从 1 开始严格递增。
 - EventPage::Gap 表示历史已过期，附当前快照。
 - NoticeAck 按订阅者确认连续事件前缀，接收者需对重发去重。
-- outbox 和投递策略尚未实现，类型支持不等于已提供可靠投递服务。
+- `subscribe` 注册累计起点，`acknowledge` 确认连续前缀，`unsubscribe` 释放保护。
+- StateWorkspace 默认每个运行保留 1000 条事件，可调；未确认事件不能被裁剪，满时返回
+  `n2x.notice.backpressure`，ACK 后 tick 重试原 CommitId。起点过期的订阅注册会拒绝。
+- 事件传输由调用方拉取，通知消费者去重；框架不内置网络推送或后台投递进程。
 
 ## 8. 异步与平台
 
 Runtime 使用对象安全的 PortFuture，不强制 Send，不绑定 Tokio，允许 Web 单线程 Future。
 原生多线程驱动可在组合层增加约束或使用专用工作线程。
 
-可以关闭 serde 编译，但当前不承诺 no_std。本地 KV 仅通过 native-kv 引入。
+关闭默认功能可仅编译模型；`serde` 可独立启用，`engine` 包含 serde。当前不承诺 no_std。
+本地 KV 仅通过 native-kv 引入；Web 组合使用 default-features=false, features=["engine"]。
 核心与端口不包含平台数据库依赖、路径格式或 JS 类型。
+
+## 9. 运行边界
+
+版本向后请求不会猜测逆变换；没有声明反向边时返回 `n2x.version.rollback_unsupported`。
+`Route::Unique` 自动经过所需版本，显式捷径必须声明对应 Manifest 并选择路径。
+
+有限自动重试针对副作用；读、转换、检查错误直接持久失败，修复后显式 Resume。
+重开不会重置自动重试次数；显式 Resume 对权威 NotApplied 开启新的人工重试预算。
+Unknown 不允许借 Resume 绕过安全恢复契约。
+
+Engine 同时限制转换输出条数与内联字节（使用 read_limits 作为 TransformRequest.limits），
+再按 write_limits 拆提交单位。适配器也须在生成结果时遵守界限。
+工作区事务收据目前保留至工作区删除，不自动回收。Native KV 容量耗尽时返回错误并保留现场。

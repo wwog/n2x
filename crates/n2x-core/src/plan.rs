@@ -1,4 +1,4 @@
-//! 路径选择输入与不可变执行计划；本模块不实现路径搜索或摘要计算。
+//! 路径选择与不可变计划模型；编译与摘要见 compiler 和 codec 模块。
 
 use crate::{
     ActionRef, Digest, ManifestId, PortId, ResourceId, Revision, RunId, RunPolicy, ScopeId, Step,
@@ -24,7 +24,7 @@ pub struct RunRequest {
     pub run: RunId,
     /// 受管理资源实例。
     pub scope: ScopeId,
-    /// 首次引导时经过验证的版本；已有版本不一致时必须报错。
+    /// 首次引导时经过验证的版本；已有 Scope 时以持久权威状态为准。
     pub initial: Option<Revision>,
     /// 目标状态。
     pub target: Revision,

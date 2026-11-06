@@ -159,6 +159,15 @@ pub enum WorkspaceMutation {
     SaveReport(Box<RunReport>),
     /// 更新一个可靠订阅者的连续确认前缀。
     AckNotice(NoticeAck),
+    /// 注册可靠订阅并保护尚未确认的历史；起点已过期时拒绝注册。
+    SubscribeNotice(NoticeAck),
+    /// 显式释放订阅，不再保护此订阅的未确认事件。
+    UnsubscribeNotice {
+        /// 所属运行。
+        run: RunId,
+        /// 订阅者身份。
+        subscriber: crate::SubscriberId,
+    },
 }
 
 /// 单写者工作区原子事务；去重凭证与变更必须一同持久化。

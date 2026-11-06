@@ -160,7 +160,7 @@ pub trait Clock {
 
 /// 规范摘要计算接口，具体编码器和 SHA-256 实现由组合层选择。
 ///
-/// 在持久化编码标准确定前，不应宣称跨语言 Plan 摘要互通。
+/// 内置模型编码见 n2x_core::codec；其他语言实现需匹配其字段及排序规则。
 pub trait Digester {
     /// 对已按协议规范编码的字节计算 SHA-256。
     fn digest(&self, canonical_bytes: &[u8]) -> Digest;

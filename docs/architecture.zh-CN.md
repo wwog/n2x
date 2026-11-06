@@ -1,8 +1,15 @@
-# n2x：统一迁移管线架构草案
+# n2x：统一迁移管线架构
 
-状态：分层已落实为 crate 结构、模型与端口契约；执行器尚未实现。本文保留设计推演，
-代码是概念示意，实际类型以 [模型契约](model.zh-CN.md)、源码 rustdoc 和
-[可编译示例](../crates/n2x-core/examples/manifest.rs) 为准。后续任务见 [实现清单](implementation.zh-CN.md)。
+状态：模型、计划编译器、sans-IO 调度机、Migrator、KV 工作区与通知恢复已经实现。
+本文保留设计原理，部分 API 片段为概念示意。实际接口见 [模型契约](model.zh-CN.md)、
+[实现与运行说明](implementation.zh-CN.md)、源码 rustdoc 和
+[可运行测试服务](../tests/migration-lab/README.md)。
+
+当前组合入口为 `Migrator::new` / `Migrator::open_native`，驱动使用 `start / tick / run`，
+控制使用 `control`，观察使用 `snapshot / drain_notices / events_after`。
+可靠订阅使用 `subscribe / acknowledge / unsubscribe`，未确认事件满时背压。
+Builder、RunHandle、StateStore profile、外部推送传输和自动垃圾回收属于扩展设计，未提供。
+数据库和文件业务实现仅位于测试项目。
 
 目标：用一套可恢复的管线调度机处理存储迁移、结构升级和数据转换。框架提供标准调度、错误、进度、通知、恢复与运行工作区；应用提供存储适配和业务转换规则。
 

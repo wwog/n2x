@@ -70,8 +70,8 @@ pub enum ReplyKind {
     Committed(Result<WorkspaceReceipt, N2xError>),
     /// Clock 的结果。
     Time(Timestamp),
-    /// WakeAt 的实际唤醒时间，不是所请求的目标时间。
-    Woken(Timestamp),
+    /// WakeAt 的实际唤醒时间或定时器错误。
+    Woken(Result<Timestamp, N2xError>),
 }
 
 /// 执行结果；必须关联原 Command，而非只使用当前 Step 推测归属。

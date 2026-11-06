@@ -1,15 +1,21 @@
 //! 平台无关的迁移模型与 sans-IO 协议。
 //!
 //! 本 crate 不执行 IO、不获取系统时间、不选择异步运行时。它固定应用、调度机与
-//! 执行端口之间的协议；计划编译、调度实现和持久化编码由上层实现。
-//! 默认启用 `serde`，可通过 `default-features = false` 移除序列化依赖。
+//! 执行端口之间的协议，默认提供计划编译器、规范摘要和纯状态调度机。
+//! `default-features = false` 只保留模型；`serde` 可独立启用。
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
 pub mod capability;
+#[cfg(feature = "engine")]
+pub mod codec;
+#[cfg(feature = "engine")]
+pub mod compiler;
 pub mod cursor;
 pub mod data;
+#[cfg(feature = "engine")]
+pub mod engine;
 pub mod error;
 pub mod identity;
 pub mod manifest;
@@ -22,8 +28,12 @@ pub mod run;
 pub mod workspace;
 
 pub use capability::*;
+#[cfg(feature = "engine")]
+pub use compiler::*;
 pub use cursor::*;
 pub use data::*;
+#[cfg(feature = "engine")]
+pub use engine::*;
 pub use error::*;
 pub use identity::*;
 pub use manifest::*;

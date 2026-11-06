@@ -7,10 +7,14 @@ repository.workspace = true
 description = "Execution port contracts for the n2x migration engine"
 
 [features]
-default = ["serde"]
+default = ["engine"]
 serde = ["n2x-core/serde"]
-native-kv = ["dep:n2x-kv"]
+engine = ["serde", "n2x-core/engine", "dep:serde_json", "dep:serde"]
+native-kv = ["engine", "dep:n2x-kv", "dep:sha2"]
 
 [dependencies]
 n2x-core.workspace = true
 n2x-kv = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
