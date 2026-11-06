@@ -57,6 +57,12 @@ crates/
 `snapshot / report / events_after` 查询，`control` 暂停、继续、取消或人工核对。
 只有整条版本边确认完成，权威版本才推进。失败与取消不会自动撤销已完成的业务效果。
 
+工作区默认每个运行保留最近 128 条提交收据，事件每个运行 1000 条、整个工作区
+20000 条。已完成运行在读取或导出报告后调用 `retire_run(CommitId, RunId, keep_report)`
+回收计划、恢复快照、事件、隔离记录和收据；报告默认保留为 RunId 墓碑。
+`open_native` 默认在删除前把同一批材料写成 `state_dir/archive/*.ndjson`，归档失败则
+保留 KV 现场。
+
 ## 功能开关
 
 ```toml
@@ -80,6 +86,7 @@ cargo check -p n2x --no-default-features --features engine
 cargo doc --workspace --all-features --no-deps
 ```
 
+- [官网（静态）](site/index.html)
 - [架构与设计边界](docs/architecture.zh-CN.md)
 - [模型契约](docs/model.zh-CN.md)
 - [实现与接入说明](docs/implementation.zh-CN.md)

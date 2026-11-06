@@ -509,8 +509,10 @@ WorkspaceStore 是语义端口，`commit_atomic` 必须清楚报告是否达到�
 
 1. 固定的状态编码与 schema 版本；它与用户数据 Revision 分开管理。
 2. Workspace 事务语义和 flush 确认屏障。
-3. 运行锁、恢复扫描、记录保留与 spool 引用回收。
-4. 容量预算与限额，默认 KV 容量不能当作无限日志。
+3. 运行锁、恢复扫描、记录保留与 spool 引用回收。运行材料和提交收据已有裁剪与
+   `RetireRun` 回收，原生组合在删除前写 JSONL 归档；spool 引用回收仍由应用负责。
+4. 容量预算与限额，默认 KV 容量不能当作无限日志。事件条数已有总预算，字节上限
+   仍由 n2x-kv 的 `max_bytes` 控制。
 5. 平台持久性说明，包括首次创建、重命名和目录项的持久化。
 
 现有 Store 只防止同一进程重复打开相同路径，没有跨进程锁。第一版建议一个 Workspace 一个活动写者，Native profile 增加独立锁文件的 OS 锁；不要使用可能被 compact 替换的 KV 文件 inode 作为锁依据。Web profile 可以提供合适的跨上下文所有权机制。

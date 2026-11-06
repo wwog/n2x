@@ -168,6 +168,18 @@ pub enum WorkspaceMutation {
         /// 订阅者身份。
         subscriber: crate::SubscriberId,
     },
+    /// 回收一个已经终止的运行留下的恢复材料。
+    ///
+    /// 只允许在 `ScopeState.active_run` 已清除、且没有可靠订阅者时执行。
+    /// 删除 PlanSnapshot、RecoverySnapshot、事件历史、隔离记录和提交收据；
+    /// 报告默认保留，作为该运行的结果与 RunId 不可复用的墓碑。
+    /// 暂停、失败、取消或待处理状态保留现场，不允许回收。
+    RetireRun {
+        /// 已经终止的运行。
+        run: RunId,
+        /// 是否保留最终报告；应用导出报告后可设为 false。
+        keep_report: bool,
+    },
 }
 
 /// 单写者工作区原子事务；去重凭证与变更必须一同持久化。
@@ -180,6 +192,10 @@ pub struct WorkspaceCommit {
     pub digest: Digest,
     /// 请求的持久级别，能力不足应在执行外部副作用前拒绝。
     pub durability: Durability,
+    /// 所属运行；用于把提交收据归入有界保留队列。
+    ///
+    /// 为 None 时实现仍必须去重，但可以不参与自动裁剪。
+    pub owner: Option<RunId>,
     /// 同一事务的所有变更，禁止拆为多次可见写入。
     pub mutations: Vec<WorkspaceMutation>,
 }

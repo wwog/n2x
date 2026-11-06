@@ -148,3 +148,16 @@ cargo test -p n2x-migration-lab
 每个测试使用独立临时目录，避免改动网页的 data。覆盖逐版、直达 v3、反向请求、
 事务回滚后继续、提交窗口重开、逐命令边界重开、暂停/取消和源视图变化。
 逐命令边界测试会执行多轮真实持久 IO，耗时通常约一分钟。
+
+面向文档的四个可读案例在 `tests/scenarios.rs`：
+
+```sh
+cargo test -p n2x-migration-lab --test scenarios
+```
+
+| 测试 | 内容 |
+| --- | --- |
+| `scenario_simple_single_edge` | v0→v1：建表、导入、目录搬迁、校验 |
+| `scenario_tick_pause_resume` | `tick` / `step` / 暂停 / 恢复的粒度差异 |
+| `scenario_fault_and_recovery` | 注入写入回滚、恢复、重开、版本推进 |
+| `scenario_web_backend_flow` | 网页 API 使用的 state/start/step/reopen/fault/resume/reset 顺序 |

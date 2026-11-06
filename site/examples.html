@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>示例 — n2x</title>
+    <meta
+      name="description"
+      content="四个可运行的 n2x 示例：单条版本边、细粒度执行控制、故障恢复与重开、网页后端流程。"
+    />
+    <script>
+      try {
+        const t = localStorage.getItem("n2x-theme");
+        if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="style.css" />
+    <noscript><style>.reveal{opacity:1;transform:none}</style></noscript>
+  </head>
+  <body data-page="examples">
+    <a class="skip-link" href="#main">跳到正文</a>
+    <header class="site-header">
+      <a class="brand" href="index.html" aria-label="n2x 首页">
+        <span class="brand-mark">n2x</span>
+        <span>migration engine</span>
+      </a>
+      <nav class="nav" id="nav" aria-label="主导航">
+        <a href="index.html" data-page="home">首页</a>
+        <a href="getting-started.html" data-page="start">开始</a>
+        <a href="examples.html" data-page="examples">示例</a>
+        <a href="concepts.html" data-page="concepts">概念</a>
+        <a href="notes.html" data-page="notes">注意</a>
+        <a class="nav-github" href="https://github.com/wwog/n2x" target="_blank" rel="noreferrer">GitHub ↗</a>
+      </nav>
+      <div class="header-actions">
+        <button class="icon-button" id="theme-toggle" type="button" aria-label="切换主题"></button>
+        <button class="icon-button menu-button" id="menu-toggle" type="button" aria-label="打开菜单" aria-expanded="false" aria-controls="nav">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
+            <path d="M4 7h16M4 12h16M4 17h16" />
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <main class="page" id="main">
+      <section class="doc-hero">
+        <p class="eyebrow">examples</p>
+        <h1>四个可以单独运行的示例</h1>
+        <p class="lead">
+          每个示例都是一个集成测试，使用同一套公共入口和真实的 SQLite / JSON / 目录。
+          先运行，再看代码，最后按需要改。
+        </p>
+        <div class="doc-meta">
+          <span class="pill accent">tests/scenarios.rs</span>
+          <span class="pill">4 个测试</span>
+          <span class="pill">无需外部服务</span>
+        </div>
+      </section>
+
+      <div class="docs">
+        <aside class="sidebar">
+          <h4>示例</h4>
+          <nav>
+            <a href="#simple">简单：v0 → v1</a>
+            <a href="#control">细粒度控制</a>
+            <a href="#fault">故障与重开</a>
+            <a href="#web">网页后端流程</a>
+            <a href="#own">换成自己的适配器</a>
+          </nav>
+          <p class="side-note">
+            源码：
+            <a href="https://github.com/wwog/n2x/blob/main/tests/migration-lab/tests/scenarios.rs" target="_blank" rel="noreferrer" style="color: var(--accent)">tests/scenarios.rs</a>
+          </p>
+        </aside>
+
+        <article class="prose">
+          <div class="callout">
+            <span class="ico">i</span>
+            <span>
+              先跑全部四个：<code>cargo test -p n2x-migration-lab --test scenarios</code>。
+              每个测试使用独立临时目录，不会改动 lab 的 <code>data/</code>。
+            </span>
+          </div>
+
+          <section id="simple">
+            <h2>简单：v0 → v1</h2>
+            <p>
+              一条边包含建表、导入 4 条用户、搬迁目录、删除源目录和校验。
+              适合先确认“步骤、提交、版本推进”如何组合。
+            </p>
+            <div class="doc-meta">
+              <span class="pill">scenario_simple_single_edge</span>
+              <span class="pill">Lab::run_to</span>
+            </div>
+            <div class="code" data-lang="sh">
+              <pre>cargo test -p n2x-migration-lab --test scenarios scenario_simple_single_edge -- --nocapture</pre>
+            </div>
+            <div class="code" data-lang="rust">
+              <pre>let dir = tempfile::tempdir()?;
+let mut lab = Lab::open(dir.path())?;
+assert_eq!(lab.state().await?["version"], "v0");
+
+let state = lab.run_to("v1").await?;
+
+assert_eq!(state["version"], "v1");
+assert_eq!(state["sql_version"], 1);
+assert_eq!(state["tables"]["users"]["columns"], json!(["id", "first_name", "last_name"]));
+assert_eq!(state["tables"]["users"]["rows"].as_array().unwrap().len(), 4);
+assert_eq!(state["files"]["a_exists"], false);
+assert_eq!(state["files"]["b"].as_array().unwrap().len(), 4);</pre>
+            </div>
+            <div class="expected"><b>预期</b>
+version       v1
+sql_version   1
+users         4 行
+files.a       false
+files.b       4 项</div>
+            <p>
+              这里只有一个版本边，所以版本从 <code>v0</code> 直接到 <code>v1</code>。
+              所有 Step 完成后才提交版本；中途失败时版本保持 <code>v0</code>。
+            </p>
+          </section>
+
+          <section id="control">
+            <h2>细粒度控制</h2>
+            <p>
+              区分三种粒度：<code>tick</code> 是一条协议命令，<code>step</code>
+              推进到下一个业务步骤完成，<code>run_to</code> 连续执行到目标版本。
+            </p>
+            <div class="doc-meta">
+              <span class="pill">scenario_tick_pause_resume</span>
+              <span class="pill">Lab::step / tick / control</span>
+            </div>
+            <div class="code" data-lang="sh">
+              <pre>cargo test -p n2x-migration-lab --test scenarios scenario_tick_pause_resume -- --nocapture</pre>
+            </div>
+            <div class="code" data-lang="rust">
+              <pre>let mut lab = Lab::open(dir.path())?;
+lab.start("v1").await?;
+
+// 只完成一个业务步骤，版本仍是 v0。
+let after_step = lab.step().await?;
+assert_eq!(after_step["version"], "v0");
+
+// 在下一个安全边界暂停。
+lab.control(n2x::Control::Pause)?;
+let mut state = lab.state().await?;
+while state["run"]["status"] != "Paused" {
+    state = lab.tick().await?;
+}
+assert_eq!(state["version"], "v0");
+
+// 继续，直到整条边完成。
+lab.resume().await?;
+let mut state = lab.state().await?;
+while state["run"]["status"] != "Completed" {
+    state = lab.tick().await?;
+}
+assert_eq!(state["version"], "v1");</pre>
+            </div>
+            <div class="expected"><b>执行序列</b>
+start          version v0, next_command 存在
+step           version v0, 一个 Step 完成
+Pause          version v0, status Paused
+Resume + tick  version v1, status Completed</div>
+            <p>
+              <code>step</code> 是 lab 的辅助方法，内部循环调用 <code>tick</code> 直到步骤完成。
+              库本身只暴露 <code>tick</code> 和 <code>run</code>；宿主可以用它们实现自己的调度粒度。
+            </p>
+          </section>
+
+          <section id="fault">
+            <h2>故障与重开</h2>
+            <p>
+              lab 可以注入一次 v2 写入事务回滚。故障后版本停在 <code>v1</code>，
+              新表没有数据；显式恢复后从失败处继续，而不是重跑整个 v1。
+            </p>
+            <div class="doc-meta">
+              <span class="pill">scenario_fault_and_recovery</span>
+              <span class="pill">Lab::fault / resume / reopen</span>
+            </div>
+            <div class="code" data-lang="sh">
+              <pre>cargo test -p n2x-migration-lab --test scenarios scenario_fault_and_recovery -- --nocapture</pre>
+            </div>
+            <div class="code" data-lang="rust">
+              <pre>let mut lab = Lab::open(dir.path())?;
+lab.run_to("v1").await?;
+
+// 让下一次 v2 写入回滚一次。
+lab.fault.set(true);
+let failed = lab.run_to("v2").await?;
+assert_eq!(failed["version"], "v1");
+assert_eq!(failed["run"]["status"], "Failed");
+assert_eq!(failed["run"]["last_error"]["code"], "lab.business.rolled_back");
+assert!(failed["tables"]["users_v2"]["rows"].as_array().unwrap().is_empty());
+
+// 修复后显式恢复，再从失败处继续。
+lab.resume().await?;
+let recovered = lab.run_to("v2").await?;
+assert_eq!(recovered["version"], "v2");
+
+// 丢弃执行器，重开同一个状态目录，继续到 v3。
+let mut reopened = lab.reopen()?;
+let v3 = reopened.run_to("v3").await?;
+assert_eq!(v3["version"], "v3");
+assert!(v3["schema"].as_array().unwrap().iter().any(|i| i["name"] == "idx_users_name"));</pre>
+            </div>
+            <div class="expected"><b>预期</b>
+v1 完成          version v1
+注入故障         next v2 write rolled back
+失败后           version v1, status Failed, users_v2 0 行
+resume + v2      version v2, users 4 行
+reopen + v3      version v3, idx_users_name 存在
+回退请求         n2x.version.rollback_unsupported</div>
+            <p>
+              这个例子覆盖了三个恢复点：写入事务回滚、执行器重开、以及在已提交后继续。
+              注意版本在失败后仍是 <code>v1</code>，不会假装到达 <code>v2</code>。
+            </p>
+          </section>
+
+          <section id="web">
+            <h2>网页后端流程</h2>
+            <p>
+              lab 的 HTTP API 是 <code>Lab</code> 方法的一层薄封装。这个示例按网页按钮的顺序
+              调用同样的方法，覆盖查询、启动、单步、重开、故障、恢复和重置。
+            </p>
+            <div class="doc-meta">
+              <span class="pill">scenario_web_backend_flow</span>
+              <span class="pill">GET /api/state · POST /api/*</span>
+            </div>
+            <div class="code" data-lang="sh">
+              <pre>cargo test -p n2x-migration-lab --test scenarios scenario_web_backend_flow -- --nocapture
+cargo run -p n2x-migration-lab   # 网页版：http://127.0.0.1:8427</pre>
+            </div>
+            <div class="code" data-lang="rust">
+              <pre>// GET /api/state
+assert_eq!(lab.state().await?["version"], "v0");
+
+// POST /api/start {"target":"v1"}
+lab.start("v1").await?;
+// POST /api/step
+lab.step().await?;
+
+// POST /api/reopen：丢弃执行器，保留状态目录
+let mut lab = lab.reopen()?;
+assert_eq!(lab.state().await?["executor_loaded"], false);
+let v1 = lab.run_to("v1").await?;   // 先恢复活动运行
+
+// POST /api/fault，然后执行 v2
+lab.fault.set(true);
+let failed = lab.run_to("v2").await?;
+assert_eq!(failed["run"]["status"], "Failed");
+
+// POST /api/resume
+lab.resume().await?;
+let v2 = lab.run_to("v2").await?;
+assert_eq!(v2["version"], "v2");
+
+// POST /api/reset：删除数据目录并重新初始化
+let root = lab.root.clone();
+drop(lab);
+std::fs::remove_dir_all(&root)?;
+let mut fresh = Lab::open(root)?;
+assert_eq!(fresh.state().await?["version"], "v0");</pre>
+            </div>
+            <div class="expected"><b>对应的 HTTP 顺序</b>
+GET  /api/state      version v0
+POST /api/start      {"target":"v1"}
+POST /api/step       完成一个步骤
+POST /api/reopen     executor_loaded=false
+POST /api/fault      下一次 v2 写入回滚
+POST /api/resume     继续失败/暂停运行
+POST /api/reset      删除并重建测试数据</div>
+            <p class="faint" style="font-size: 0.84rem">
+              HTTP 处理器、响应格式和错误码见
+              <a href="https://github.com/wwog/n2x/blob/main/tests/migration-lab/src/main.rs" target="_blank" rel="noreferrer" style="color: var(--accent)">main.rs</a>。
+              服务只监听 127.0.0.1，不包含生产部署功能。
+            </p>
+          </section>
+
+          <section id="own">
+            <h2>换成自己的适配器</h2>
+            <p>
+              四个示例都使用 lab 的 JSON、SQLite 和目录端口。把其中任何一个替换成你的数据库时，
+              需要先满足两件事：
+            </p>
+            <ul>
+              <li>写入端能按同一个 <code>OperationId</code> 去重，或者能权威回答“做没做”；</li>
+              <li>Reader 能提供稳定游标和可验证的源视图。</li>
+            </ul>
+            <div class="link-list">
+              <a href="getting-started.html#ports">
+                <span><strong>端口实现骨架</strong> — Writer / Reader / Task / Check</span>
+                <span>getting started →</span>
+              </a>
+              <a href="concepts.html#recovery">
+                <span><strong>恢复契约</strong> — Intent、Receipt、Unknown、Reconcile</span>
+                <span>concepts →</span>
+              </a>
+              <a href="notes.html#writer">
+                <span><strong>写入端注意事项</strong> — 原子去重、凭证保留期</span>
+                <span>notes →</span>
+              </a>
+            </div>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <span class="footer-brand">
+        <span class="brand-mark" style="width: 28px; height: 28px; font-size: 0.68rem">n2x</span>
+        <span>© <span id="year">2026</span> n2x · MIT OR Apache-2.0</span>
+      </span>
+      <nav aria-label="文档链接">
+        <a href="https://github.com/wwog/n2x/blob/main/docs/architecture.zh-CN.md" target="_blank" rel="noreferrer">架构</a>
+        <a href="https://github.com/wwog/n2x/blob/main/docs/model.zh-CN.md" target="_blank" rel="noreferrer">模型契约</a>
+        <a href="https://github.com/wwog/n2x/blob/main/docs/implementation.zh-CN.md" target="_blank" rel="noreferrer">实现说明</a>
+        <a href="https://github.com/wwog/n2x" target="_blank" rel="noreferrer">GitHub</a>
+      </nav>
+    </footer>
+    <script src="app.js"></script>
+  </body>
+</html>

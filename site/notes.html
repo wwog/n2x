@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>注意事项 — n2x</title>
+    <meta
+      name="description"
+      content="n2x 上线前的实际边界：KV 容量与保留、归档、写入端契约、持久级别、单写者、Blob 与计划冻结。"
+    />
+    <script>
+      try {
+        const t = localStorage.getItem("n2x-theme");
+        if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="style.css" />
+    <noscript><style>.reveal{opacity:1;transform:none}</style></noscript>
+  </head>
+  <body data-page="notes">
+    <a class="skip-link" href="#main">跳到正文</a>
+    <header class="site-header">
+      <a class="brand" href="index.html" aria-label="n2x 首页">
+        <span class="brand-mark">n2x</span>
+        <span>migration engine</span>
+      </a>
+      <nav class="nav" id="nav" aria-label="主导航">
+        <a href="index.html" data-page="home">首页</a>
+        <a href="getting-started.html" data-page="start">开始</a>
+        <a href="examples.html" data-page="examples">示例</a>
+        <a href="concepts.html" data-page="concepts">概念</a>
+        <a href="notes.html" data-page="notes">注意</a>
+        <a class="nav-github" href="https://github.com/wwog/n2x" target="_blank" rel="noreferrer">GitHub ↗</a>
+      </nav>
+      <div class="header-actions">
+        <button class="icon-button" id="theme-toggle" type="button" aria-label="切换主题"></button>
+        <button class="icon-button menu-button" id="menu-toggle" type="button" aria-label="打开菜单" aria-expanded="false" aria-controls="nav">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
+            <path d="M4 7h16M4 12h16M4 17h16" />
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <main class="page" id="main">
+      <section class="doc-hero">
+        <p class="eyebrow">notes</p>
+        <h1>上线前检查</h1>
+        <p class="lead">
+          这里列出运行时约束和需要应用自己负责的部分。默认值可以工作，但容量、写入端
+          契约和单写者边界需要按你的场景确认。
+        </p>
+        <div class="doc-meta">
+          <span class="pill accent">部署前阅读</span>
+          <span class="pill">含默认值</span>
+          <span class="pill">含故障处理步骤</span>
+        </div>
+      </section>
+
+      <div class="docs">
+        <aside class="sidebar">
+          <h4>检查项</h4>
+          <nav>
+            <a href="#kv">KV 容量与保留</a>
+            <a href="#retire">retire 与归档</a>
+            <a href="#writer">写入端契约</a>
+            <a href="#durability">持久级别</a>
+            <a href="#single">单写者</a>
+            <a href="#rollback">没有自动回滚</a>
+            <a href="#blob">大数据与 Blob</a>
+            <a href="#frozen">计划冻结</a>
+            <a href="#drive">运行驱动</a>
+            <a href="#full">KV 满了怎么办</a>
+            <a href="#when">不适用场景</a>
+          </nav>
+        </aside>
+
+        <article class="prose">
+          <section id="kv">
+            <h2>KV 容量与保留</h2>
+            <p>Workspace 只保存恢复所需的小状态。当前默认值：</p>
+            <div class="table-wrap">
+              <table>
+                <tr><th>项目</th><th>默认值</th><th>调整</th></tr>
+                <tr><td>KV 文件上限</td><td>64 MiB；单值 16 MiB；单帧 32 MiB</td><td><code>StoreOptions</code></td></tr>
+                <tr><td>提交收据</td><td>每个 Run 最近 128 条</td><td><code>with_commit_retention</code></td></tr>
+                <tr><td>事件</td><td>每个 Run 1,000 条</td><td><code>with_event_limit</code></td></tr>
+                <tr><td>事件总预算</td><td>整个工作区 20,000 条</td><td><code>with_event_budget</code></td></tr>
+                <tr><td>计划 / 恢复快照 / 报告</td><td>每个 Run 一份，直到回收</td><td><code>retire_run</code></td></tr>
+              </table>
+            </div>
+            <div class="callout warn">
+              <span class="ico">!</span>
+              <span>
+                容量耗尽时提交返回持久化错误，运行停在原地。压缩只回收被覆盖的死数据，
+                不会删除仍然活着的收据、事件和运行材料。
+              </span>
+            </div>
+            <p class="faint" style="font-size: 0.84rem">
+              <code>Migrator::open_native</code> 使用默认 <code>StoreOptions</code>，没有直接暴露
+              <code>max_bytes</code>。需要修改上限时，自己组合 <code>StateWorkspace</code> 和
+              <code>StateBackend</code>。
+            </p>
+          </section>
+
+          <section id="retire">
+            <h2>retire 与归档</h2>
+            <p>
+              <code>retire_run(CommitId, RunId, keep_report)</code> 回收已完成运行的计划、
+              恢复快照、事件、隔离记录、提交日志和收据。约束：
+            </p>
+            <ul>
+              <li>只接受 <strong>Completed / CompletedWithRejections</strong>；活动、暂停、失败、取消、待处理返回冲突。</li>
+              <li>必须先 <code>unsubscribe</code> 所有可靠订阅者，否则返回冲突。</li>
+              <li>报告默认保留；导出后传 <code>keep_report = false</code> 可一并删除。</li>
+              <li>同一个 <code>CommitId</code> 重试是幂等的。</li>
+            </ul>
+            <p>
+              原生组合在删除前写 <code>state/archive/&lt;run&gt;-&lt;hash&gt;.ndjson</code> 并 fsync；
+              归档失败时提交返回错误，KV 保持不变。归档按运行幂等，重试不会重复写入。
+            </p>
+            <div class="code" data-lang="json">
+              <pre>{"format_version":1,"run":"...","scope":"...","current":"v1","target":"v1","plan":"&lt;sha256&gt;","retire_commit":"...","archived_at":1730000000000,"entries":7}
+{"kind":"plan","key":"n2x/v1/plan/\"...\"","value":{...}}
+{"kind":"report","key":"n2x/v1/report/\"...\"","value":{...}}
+{"kind":"quarantine","key":"n2x/v1/quarantine/[...]","value":[...]}</pre>
+            </div>
+            <p class="faint" style="font-size: 0.84rem">
+              归档包含隔离记录，可能含原始敏感数据。按业务数据的保护级别对待
+              <code>archive/</code> 目录；它不占 KV 容量，生命周期由应用负责。
+            </p>
+          </section>
+
+          <section id="writer">
+            <h2>写入端契约</h2>
+            <p>框架保证顺序和持久化，不能替适配器实现幂等。写入端需要满足其中之一：</p>
+            <ul>
+              <li><strong>幂等：</strong>同一个 <code>OperationId</code> 重复执行，业务效果只产生一次。</li>
+              <li><strong>可对账：</strong>结果不明时能权威查询“做没做”。</li>
+            </ul>
+            <p>必须遵守的细节：</p>
+            <ul>
+              <li>相同 <code>OperationId</code> 不同 <code>request_digest</code> 必须拒绝。</li>
+              <li>去重凭证与业务效果在同一个事务里保存，保留期覆盖允许的恢复期限。</li>
+              <li>“暂时查不到”不能当成 <code>NotApplied</code>；可能只是还没提交。</li>
+              <li><code>CheckAction</code> 必须只读；<code>TransformAction</code> 必须确定性。</li>
+            </ul>
+            <p class="faint" style="font-size: 0.84rem">
+              编译器会检查声明的恢复能力，但无法验证实现真的遵守协议。适配器示例见
+              <a href="https://github.com/wwog/n2x/blob/main/tests/migration-lab/src/fixtures.rs" target="_blank" rel="noreferrer" style="color: var(--accent)">fixtures.rs</a>。
+            </p>
+          </section>
+
+          <section id="durability">
+            <h2>持久级别</h2>
+            <p>
+              默认 <code>RunPolicy::durability = Durable</code>：每次工作区提交都要 flush 成功，
+              引擎才继续发下一个业务命令。
+            </p>
+            <p>
+              <code>Durability::Memory</code> 跳过 flush，只适合测试或临时运行。
+              外部副作用仍会发生，但工作区状态不承诺重开恢复；不要用于生产可恢复运行。
+            </p>
+          </section>
+
+          <section id="single">
+            <h2>单写者</h2>
+            <p>
+              当前只有一个活动写者。原生入口用独立锁文件取得进程级独占权；
+              KV 没有 CAS，也没有跨进程锁，不能用 <code>get + set</code> 假装抢锁。
+            </p>
+            <p>
+              锁文件不要指向可能被 compact 替换的 <code>state.kv</code> inode。
+              多写者、fencing、分布式租约不在当前承诺里。
+            </p>
+          </section>
+
+          <section id="rollback">
+            <h2>没有自动回滚</h2>
+            <p>
+              失败、暂停、取消都不表示目标端没变。版本权威只在整条边全部确认后推进；
+              已完成的外部效果不会被自动撤销。
+            </p>
+            <p>
+              需要清理或撤销时，把它建模成显式的 <code>Task</code> 或 <code>Check</code>，
+              并声明恢复契约。不要假设“取消”等于“回到起点”。
+            </p>
+          </section>
+
+          <section id="blob">
+            <h2>大数据与 Blob</h2>
+            <p>
+              Transfer 的批次有记录数和内联字节上限。大文件、大导出使用 <code>BlobStore</code>，
+              KV 只保存引用。恢复材料存在时，相关 Blob 不能被提前回收；spool 的引用回收
+              目前由应用负责。
+            </p>
+            <p>
+              把整个数据库导出塞进 KV 会撞上单值/帧限制，也会拖慢恢复。
+            </p>
+          </section>
+
+          <section id="frozen">
+            <h2>计划冻结</h2>
+            <p>
+              运行开始时会冻结 <code>PlanSnapshot</code>，恢复时重新编译并比较摘要。
+              修改 Manifest、ActionRef revision、转换函数或能力声明后，恢复返回
+              <code>PLAN_CHANGED</code>，不会静默使用新行为。
+            </p>
+            <p>需要改变迁移逻辑时，先结束当前运行，再把“重建计划”当成显式管理操作。</p>
+          </section>
+
+          <section id="drive">
+            <h2>运行驱动</h2>
+            <p>
+              Engine 不自己睡眠、不自己起线程、不内置网络推送。宿主调用 <code>tick</code> /
+              <code>run</code>，用自己的执行器处理唤醒和取消。
+            </p>
+            <p>
+              通知由调用方拉取（<code>events_after</code>）或从 <code>drain_notices</code> 取走。
+              可靠订阅要求消费者按 <code>RunId + sequence</code> 去重并 ACK。
+            </p>
+          </section>
+
+          <section id="full">
+            <h2>KV 满了怎么办</h2>
+            <p>不要直接删 <code>state.kv</code>。按顺序处理：</p>
+            <ol class="checklist">
+              <li><b>读取并导出</b>已完成运行的报告与隔离记录。</li>
+              <li><b>unsubscribe</b> 所有可靠订阅者，释放事件历史保护。</li>
+              <li><b>retire_run</b> 已完成的运行；一次回收一个，保留报告或按需删除。</li>
+              <li><b>重试原 CommitId</b>：失败的那次提交用同一个 ID 重试。</li>
+              <li><b>确认活键下降</b>：用 n2x-kv 统计或查看器观察，再继续。</li>
+            </ol>
+            <p>
+              收据裁剪依赖引擎只重试当前命令。不要绕过 <code>Migrator</code> 手动重放很旧的
+              <code>CommitId</code>，那可能用旧状态覆盖新状态。
+            </p>
+          </section>
+
+          <section id="when">
+            <h2>不适用场景</h2>
+            <ul>
+              <li>一次性的小脚本，失败后重跑即可。</li>
+              <li>需要跨系统两阶段提交或全局锁。</li>
+              <li>把 KV 当数据仓库或全量导出载体。</li>
+              <li>需要框架自带后台调度、多写者租约或网络推送。</li>
+            </ul>
+            <div class="link-list">
+              <a href="examples.html">
+                <span><strong>先跑示例</strong> — 简单、控制、故障、网页</span>
+                <span>examples →</span>
+              </a>
+              <a href="concepts.html#design">
+                <span><strong>设计约束</strong> — 哪些由框架保证，哪些由适配器保证</span>
+                <span>concepts →</span>
+              </a>
+            </div>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <span class="footer-brand">
+        <span class="brand-mark" style="width: 28px; height: 28px; font-size: 0.68rem">n2x</span>
+        <span>© <span id="year">2026</span> n2x · MIT OR Apache-2.0</span>
+      </span>
+      <nav aria-label="文档链接">
+        <a href="https://github.com/wwog/n2x/blob/main/docs/architecture.zh-CN.md" target="_blank" rel="noreferrer">架构</a>
+        <a href="https://github.com/wwog/n2x/blob/main/docs/model.zh-CN.md" target="_blank" rel="noreferrer">模型契约</a>
+        <a href="https://github.com/wwog/n2x/blob/main/docs/implementation.zh-CN.md" target="_blank" rel="noreferrer">实现说明</a>
+        <a href="https://github.com/wwog/n2x" target="_blank" rel="noreferrer">GitHub</a>
+      </nav>
+    </footer>
+    <script src="app.js"></script>
+  </body>
+</html>

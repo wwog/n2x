@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>开始使用 — n2x</title>
+    <meta
+      name="description"
+      content="从运行本地 lab 开始，逐步声明 Manifest、实现端口、启动 Migrator，并查看状态、报告和归档。"
+    />
+    <script>
+      try {
+        const t = localStorage.getItem("n2x-theme");
+        if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="style.css" />
+    <noscript><style>.reveal{opacity:1;transform:none}</style></noscript>
+  </head>
+  <body data-page="start">
+    <a class="skip-link" href="#main">跳到正文</a>
+    <header class="site-header">
+      <a class="brand" href="index.html" aria-label="n2x 首页">
+        <span class="brand-mark">n2x</span>
+        <span>migration engine</span>
+      </a>
+      <nav class="nav" id="nav" aria-label="主导航">
+        <a href="index.html" data-page="home">首页</a>
+        <a href="getting-started.html" data-page="start">开始</a>
+        <a href="examples.html" data-page="examples">示例</a>
+        <a href="concepts.html" data-page="concepts">概念</a>
+        <a href="notes.html" data-page="notes">注意</a>
+        <a class="nav-github" href="https://github.com/wwog/n2x" target="_blank" rel="noreferrer">GitHub ↗</a>
+      </nav>
+      <div class="header-actions">
+        <button class="icon-button" id="theme-toggle" type="button" aria-label="切换主题"></button>
+        <button class="icon-button menu-button" id="menu-toggle" type="button" aria-label="打开菜单" aria-expanded="false" aria-controls="nav">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
+            <path d="M4 7h16M4 12h16M4 17h16" />
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <main class="page" id="main">
+      <section class="doc-hero">
+        <p class="eyebrow">getting started</p>
+        <h1>从运行 lab 开始</h1>
+        <p class="lead">
+          这一页按“先看效果，再接自己的代码”的顺序组织。第一步不需要写任何适配器；
+          第二步开始声明迁移边；第三步实现端口并启动执行。
+        </p>
+        <div class="doc-meta">
+          <span class="pill accent">Rust 2024</span>
+          <span class="pill">约 15 分钟</span>
+          <span class="pill">需要 SQLite（lab 自带）</span>
+        </div>
+      </section>
+
+      <div class="docs">
+        <aside class="sidebar">
+          <h4>本页</h4>
+          <nav>
+            <a href="#lab">1. 运行 lab</a>
+            <a href="#dependency">2. 加依赖</a>
+            <a href="#manifest">3. 声明一条边</a>
+            <a href="#ports">4. 实现端口</a>
+            <a href="#run">5. 启动与执行</a>
+            <a href="#report">6. 状态与报告</a>
+            <a href="#retire">7. 保留与归档</a>
+            <a href="#next">下一步</a>
+          </nav>
+          <p class="side-note">
+            示例源码在
+            <a href="https://github.com/wwog/n2x/blob/main/tests/migration-lab/tests/scenarios.rs" target="_blank" rel="noreferrer" style="color: var(--accent)">tests/scenarios.rs</a>。
+          </p>
+        </aside>
+
+        <article class="prose">
+          <section id="lab">
+            <h2>1. 运行 lab</h2>
+            <p>
+              lab 是一个本地网页服务，使用真实的 SQLite、JSON 和目录。它在测试项目里，
+              不属于框架发布内容，但用到了全部公共入口。
+            </p>
+            <div class="code" data-lang="sh">
+              <pre>cargo run -p n2x-migration-lab
+# 打开 http://127.0.0.1:8427</pre>
+            </div>
+            <p>在页面里依次操作：</p>
+            <div class="table-wrap">
+              <table>
+                <tr><th>操作</th><th>你会看到</th></tr>
+                <tr><td>目标选择 <code>v1</code>，点击“准备逐项迁移”</td><td>只编译并保存计划，版本仍是 <code>v0</code></td></tr>
+                <tr><td>多次点击“完成下一项”</td><td>建表、导入 4 条用户、复制目录、删除源目录、校验</td></tr>
+                <tr><td>全部步骤完成</td><td>版本推进到 <code>v1</code>，SQL <code>user_version = 1</code>，<code>a/</code> 已删除</td></tr>
+              </table>
+            </div>
+            <div class="expected"><b>预期状态</b>
+version       v1
+sql_version   1
+users         4 行
+files.a       false
+files.b       files/readme.txt, files/nested/note.txt, ...
+</div>
+            <p class="faint" style="font-size: 0.84rem">
+              这一步只运行，不写代码。接下来开始把同样的结构放进你自己的项目。
+            </p>
+          </section>
+
+          <section id="dependency">
+            <h2>2. 加依赖</h2>
+            <p>默认启用 <code>engine</code> 和 <code>native-kv</code>。如果平台自己实现存储，只启用 <code>engine</code>。</p>
+            <div class="code" data-lang="toml">
+              <pre>[dependencies]
+n2x = { path = "../n2x/crates/n2x" }
+
+# Web / WASM：自己实现 Workspace、Clock、Lock 和端口
+# n2x = { path = "../n2x/crates/n2x", default-features = false, features = ["engine"] }</pre>
+            </div>
+          </section>
+
+          <section id="manifest">
+            <h2>3. 声明一条边</h2>
+            <p>
+              一条 <code>Manifest</code> 是一个版本边。边里按顺序放 <code>Task</code>、
+              <code>Transfer</code>、<code>Check</code>。下面这条边包含建表、导入和校验：
+            </p>
+            <div class="code" data-lang="rust">
+              <pre>use n2x::{ActionCall, ActionRef, Manifest, Step, StepKind};
+
+fn aref(id: &amp;str) -&gt; ActionRef {
+    ActionRef { id: id.into(), revision: 1 }
+}
+
+fn call(id: &amp;str, ports: &amp;[&amp;str]) -&gt; ActionCall {
+    ActionCall {
+        action: aref(id),
+        ports: ports.iter().map(|port| (*port).into()).collect(),
+        config: None,
+    }
+}
+
+fn manifest() -&gt; Manifest {
+    Manifest {
+        id: "import-users".into(),
+        from: "v0".into(),
+        to: "v1".into(),
+        steps: vec![
+            Step {
+                id: "create-users".into(),
+                kind: StepKind::Task(call("sql.create_users", &amp;["target"])),
+                policy: Default::default(),
+            },
+            Step {
+                id: "copy-users".into(),
+                kind: StepKind::Transfer(Box::new(TransferSpec {
+                    read: StreamSpec { port: "source".into(), stream: "users".into(), config: None },
+                    transform: None,
+                    write: StreamSpec { port: "target".into(), stream: "users".into(), config: None },
+                    consistency: ReadConsistency::Frozen,
+                    read_limits: Default::default(),
+                    write_limits: Default::default(),
+                    invalid_data: Default::default(),
+                })),
+                policy: Default::default(),
+            },
+            Step {
+                id: "verify-users".into(),
+                kind: StepKind::Check(call("users.verify", &amp;["target"])),
+                policy: Default::default(),
+            },
+        ],
+        metadata: Default::default(),
+    }
+}</pre>
+            </div>
+            <p class="faint" style="font-size: 0.84rem">
+              需要先导入 <code>TransferSpec</code>、<code>StreamSpec</code>、<code>ReadConsistency</code>。
+              完整 helper 见
+              <a href="https://github.com/wwog/n2x/blob/main/crates/n2x-core/examples/manifest.rs" target="_blank" rel="noreferrer" style="color: var(--accent)">manifest.rs</a>。
+            </p>
+            <details class="deep">
+              <summary>字段说明</summary>
+              <div class="table-wrap">
+                <table>
+                  <tr><th>字段</th><th>说明</th></tr>
+                  <tr><td><code>from</code> / <code>to</code></td><td>版本标识，不推断大小关系，也不自动生成反向边。</td></tr>
+                  <tr><td><code>steps</code></td><td>按顺序执行；全部确认后才推进到 <code>to</code>。</td></tr>
+                  <tr><td><code>Task</code></td><td>一次有恢复契约的副作用，例如建表、发布、清理。</td></tr>
+                  <tr><td><code>Transfer</code></td><td>读批次 → 可选转换 → 分单位写入；整批确认后才推进游标。</td></tr>
+                  <tr><td><code>Check</code></td><td>只读校验；失败阻止版本推进。</td></tr>
+                  <tr><td><code>ActionRef.revision</code></td><td>实现修订号。恢复时会校验，改行为必须增加。</td></tr>
+                </table>
+              </div>
+            </details>
+          </section>
+
+          <section id="ports">
+            <h2>4. 实现端口</h2>
+            <p>
+              端口是框架与真实资源之间的边界。按步骤类型注册对应的实现：
+            </p>
+            <div class="table-wrap">
+              <table>
+                <tr><th>步骤</th><th>需要的实现</th><th>最小职责</th></tr>
+                <tr><td><code>Task</code></td><td><code>TaskAction</code></td><td>执行副作用；支持去重或权威对账。</td></tr>
+                <tr><td><code>Transfer</code></td><td><code>Reader</code> + <code>Writer</code>（可选 <code>TransformAction</code>）</td><td>有界读取、稳定游标；按单位写入并返回凭证。</td></tr>
+                <tr><td><code>Check</code></td><td><code>CheckAction</code></td><td>只读校验；失败返回错误。</td></tr>
+              </table>
+            </div>
+
+            <p>
+              先看写入端。框架在 Apply 前持久化 Intent，重试时复用同一个
+              <code>OperationId</code>；写入端必须拒绝“同一个 ID、不同请求摘要”，并能在重开后回答“做没做”。
+            </p>
+            <div class="code" data-lang="rust">
+              <pre>use std::collections::BTreeMap;
+use n2x::runtime::{PortFuture, PortResult, ResourcePort, Writer};
+use n2x::*;
+
+#[derive(Default)]
+struct Target {
+    // 演示用内存表；生产环境必须与业务写入放在同一个事务里。
+    applied: BTreeMap&lt;OperationId, Digest&gt;,
+}
+
+impl ResourcePort for Target {
+    fn binding(&amp;self) -&gt; PortBinding {
+        PortBinding {
+            port: "target".into(),
+            resource: "sqlite/example".into(),
+            adapter: ActionRef { id: "target.writer".into(), revision: 1 },
+        }
+    }
+}
+
+impl Writer for Target {
+    fn capabilities(&amp;self, _: &amp;StreamSpec) -&gt; Result&lt;WriterCapabilities, N2xError&gt; {
+        Ok(WriterCapabilities {
+            recovery: RecoveryCapabilities {
+                replay: ReplaySafety::Deduplicated { retention: None },
+                authoritative_lookup: true,
+                durability: Durability::Durable,
+            },
+            limits: BatchLimits::default(),
+            atomic_unit: true,
+        })
+    }
+
+    fn apply(&amp;mut self, request: ApplyRequest)
+        -&gt; PortFuture&lt;'_, Result&lt;Receipt, OperationFailure&gt;&gt;
+    {
+        Box::pin(async move {
+            let EffectRequest::Write { items, .. } = &amp;request.effect else {
+                return Err(failure("target expects Write", ApplyState::NotApplied));
+            };
+            if let Some(old) = self.applied.get(&amp;request.context.id) {
+                if *old != request.context.request_digest {
+                    return Err(failure("operation reused", ApplyState::NotApplied));
+                }
+            } else {
+                // 在这里写 items。真实实现要把写入和 applied.insert 放在同一个事务。
+                self.applied.insert(
+                    request.context.id.clone(),
+                    request.context.request_digest,
+                );
+            }
+            Ok(Receipt {
+                operation: request.context.id,
+                request_digest: request.context.request_digest,
+                proof: None,
+            })
+        })
+    }
+
+    fn reconcile(&amp;mut self, request: ReconcileRequest)
+        -&gt; PortResult&lt;'_, ReconcileResult&gt;
+    {
+        Box::pin(async move {
+            Ok(match self.applied.get(&amp;request.request.context.id) {
+                Some(digest) if *digest == request.request.context.request_digest =&gt; {
+                    ReconcileResult::Applied(Receipt {
+                        operation: request.request.context.id,
+                        request_digest: *digest,
+                        proof: None,
+                    })
+                }
+                Some(_) =&gt; return Err(err("operation reused")),
+                None =&gt; ReconcileResult::NotApplied,
+            })
+        })
+    }
+}</pre>
+            </div>
+            <p class="faint" style="font-size: 0.84rem">
+              <code>failure</code> / <code>err</code> 是省略的错误构造函数。
+              真实 SQLite 适配器见
+              <a href="https://github.com/wwog/n2x/blob/main/tests/migration-lab/src/fixtures.rs" target="_blank" rel="noreferrer" style="color: var(--accent)">fixtures.rs</a>。
+            </p>
+
+            <details class="deep">
+              <summary>Reader 返回什么：ReadBatch 与 SourceState</summary>
+              <p>
+                Reader 每次返回一个有界批次。首批建立 <code>SourceState</code>，后续批次必须与它一致；
+                <code>eof == false</code> 时 <code>next</code> 必须存在并且能前进。
+              </p>
+              <div class="code" data-lang="rust">
+                <pre>use n2x::runtime::Reader;
+use n2x::*;
+
+#[derive(Default)]
+struct Source;
+
+impl Reader for Source {
+    fn capabilities(&amp;self, _: &amp;StreamSpec) -&gt; Result&lt;ReaderCapabilities, N2xError&gt; {
+        Ok(ReaderCapabilities {
+            consistency: vec![ReadConsistency::Frozen],
+            resumable: true,
+        })
+    }
+
+    fn read(&amp;mut self, request: ReadRequest) -&gt; PortResult&lt;'_, ReadBatch&gt; {
+        Box::pin(async move {
+            // 按 request.cursor / request.limits 读取；这里只演示返回结构。
+            let source = SourceState {
+                resource: "json/users".into(),
+                consistency: ReadConsistency::Frozen,
+                token: None,
+            };
+            Ok(ReadBatch {
+                items: vec![],   // 本批 Envelope
+                next: None,      // 未结束时必须是 Some(Cursor)
+                eof: true,
+                source,
+            })
+        })
+    }
+}</pre>
+              </div>
+            </details>
+
+            <details class="deep">
+              <summary>注册表与命名规则</summary>
+              <p>
+                <code>Registry</code> 的 map key 必须等于实现的 <code>binding().port</code>；
+                <code>ActionCall.action</code> 必须与实现的 <code>action()</code> 完全一致，包括 revision。
+              </p>
+              <div class="code" data-lang="rust">
+                <pre>let mut registry = Registry::default();
+registry.readers.insert("source".into(), Box::new(Source::default()));
+registry.writers.insert("target".into(), Box::new(Target::default()));
+registry.tasks.insert(aref("sql.create_users"), Box::new(CreateUsers));
+registry.checks.insert(aref("users.verify"), Box::new(VerifyUsers));</pre>
+              </div>
+            </details>
+          </section>
+
+          <section id="run">
+            <h2>5. 启动与执行</h2>
+            <p>
+              原生入口会先取得独占锁，再打开 <code>state.kv</code> 和 <code>archive/</code>。
+              <code>start</code> 编译或恢复计划；<code>run</code> 连续执行；<code>tick</code> 只执行一条命令。
+            </p>
+            <div class="code" data-lang="rust">
+              <pre>use n2x::{Migrator, Route, RunRequest};
+
+let mut migrator = Migrator::open_native("./state", vec![manifest()], registry)?;
+
+let run: RunId = "run-2026-11-06".into();
+migrator
+    .start(RunRequest {
+        run: run.clone(),
+        scope: "account/42".into(),
+        initial: Some("v0".into()),
+        target: "v1".into(),
+        route: Route::Unique,
+        policy: Default::default(),
+    })
+    .await?;
+
+// 连续执行到没有待执行命令，然后返回已保存的报告。
+let report = migrator.run().await?;
+println!("{:?}", report.outcome);</pre>
+            </div>
+            <p>
+              这里的 <code>.await</code> 需要由你的执行器驱动。n2x 不绑定 Tokio；
+              仓库测试使用 <code>futures::executor::block_on</code>。
+            </p>
+            <div class="callout">
+              <span class="ico">i</span>
+              <span>
+                <b><code>run</code> 与 <code>tick</code>：</b>
+                <code>tick</code> 推进一条协议命令，适合调试和宿主事件循环；
+                <code>run</code> 循环调用 <code>tick</code>，遇到失败或需要人工处理时返回错误。
+              </span>
+            </div>
+            <details class="deep">
+              <summary>暂停、恢复、取消</summary>
+              <div class="code" data-lang="rust">
+                <pre>migrator.control(Control::Pause)?;   // 下一个安全边界暂停
+migrator.control(Control::Resume)?;  // 继续
+migrator.control(Control::Cancel)?;  // 停止后续工作，不自动回滚</pre>
+              </div>
+              <p>
+                暂停、恢复、取消都是控制信号；它们不会撤销已经完成的外部写入。
+                失败或待处理的运行需要先处理，再恢复。
+              </p>
+            </details>
+          </section>
+
+          <section id="report">
+            <h2>6. 状态与报告</h2>
+            <p>
+              三个查询入口：<code>snapshot()</code> 看当前运行，<code>report(run)</code>
+              读已保存报告，<code>events_after(run, after, limit)</code> 补读关键事件。
+            </p>
+            <div class="code" data-lang="rust">
+              <pre>if let Some(snapshot) = migrator.snapshot() {
+    println!("{:?} {:?} -> {:?}", snapshot.status, snapshot.current, snapshot.target);
+}
+
+let stored = migrator.report(run.clone()).await?;
+let page = migrator.events_after(run, 0, 100).await?;</pre>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <tr><th>状态</th><th>含义 / 下一步</th></tr>
+                <tr><td><code>Completed</code></td><td>全部步骤和版本推进已确认；读取报告，按需回收。</td></tr>
+                <tr><td><code>Failed</code></td><td>执行停止；修复后显式 <code>Resume</code>，不会自动回滚。</td></tr>
+                <tr><td><code>NeedsAttention</code></td><td>存在未知结果；先对账或人工确认，不能直接重试。</td></tr>
+                <tr><td><code>Paused</code></td><td>已在安全边界暂停；<code>Resume</code> 继续。</td></tr>
+                <tr><td><code>Running</code> / <code>Recovering</code></td><td>继续 <code>tick</code> / <code>run</code>。</td></tr>
+              </table>
+            </div>
+          </section>
+
+          <section id="retire">
+            <h2>7. 保留与归档</h2>
+            <p>
+              已完成运行会保留计划、恢复快照、报告、事件和隔离记录。读取报告后，
+              用 <code>retire_run</code> 回收。原生组合会先把这些材料写入
+              <code>state/archive/&lt;run&gt;-&lt;hash&gt;.ndjson</code>，成功后才删除 KV。
+            </p>
+            <div class="code" data-lang="rust">
+              <pre>let report = migrator.report(run.clone()).await?.expect("report");
+// 导出 report / 隔离记录 ...
+
+migrator
+    .unsubscribe("unsub-1".into(), run.clone(), "ui".into())
+    .await?;
+
+// true = 保留报告作为 RunId 墓碑；false = 报告也删，归档里仍有。
+migrator
+    .retire_run("retire-1".into(), run, true)
+    .await?;</pre>
+            </div>
+            <p class="faint" style="font-size: 0.84rem">
+              活动、暂停、失败、取消或仍有可靠订阅者的运行不会被回收。
+              容量与归档格式见 <a href="notes.html" style="color: var(--accent)">注意事项</a>。
+            </p>
+          </section>
+
+          <section id="next">
+            <h2>下一步</h2>
+            <div class="link-list">
+              <a href="examples.html">
+                <span><strong>示例</strong> — 简单迁移、细粒度控制、故障恢复、网页流程</span>
+                <span>examples →</span>
+              </a>
+              <a href="concepts.html">
+                <span><strong>概念</strong> — Manifest、Step、Run、Intent、Workspace、事件</span>
+                <span>concepts →</span>
+              </a>
+              <a href="notes.html">
+                <span><strong>注意事项</strong> — 容量、保留、归档、持久级别、单写者</span>
+                <span>notes →</span>
+              </a>
+            </div>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <span class="footer-brand">
+        <span class="brand-mark" style="width: 28px; height: 28px; font-size: 0.68rem">n2x</span>
+        <span>© <span id="year">2026</span> n2x · MIT OR Apache-2.0</span>
+      </span>
+      <nav aria-label="文档链接">
+        <a href="https://github.com/wwog/n2x/blob/main/docs/architecture.zh-CN.md" target="_blank" rel="noreferrer">架构</a>
+        <a href="https://github.com/wwog/n2x/blob/main/docs/model.zh-CN.md" target="_blank" rel="noreferrer">模型契约</a>
+        <a href="https://github.com/wwog/n2x/blob/main/docs/implementation.zh-CN.md" target="_blank" rel="noreferrer">实现说明</a>
+        <a href="https://github.com/wwog/n2x" target="_blank" rel="noreferrer">GitHub</a>
+      </nav>
+    </footer>
+    <script src="app.js"></script>
+  </body>
+</html>

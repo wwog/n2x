@@ -3,7 +3,7 @@ use crate::*;
 use n2x_core::*;
 use sha2::{Digest as _, Sha256};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
     io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
@@ -32,14 +32,26 @@ impl StateBackend for KvBackend {
     fn get(&self, key: &str) -> Result<Option<Vec<u8>>, N2xError> {
         self.store.get(key).map_err(storage)
     }
+    fn keys(&self, prefix: &str) -> Result<Vec<String>, N2xError> {
+        self.store.keys(Some(prefix)).map_err(storage)
+    }
     fn write(
         &mut self,
         values: &BTreeMap<String, Vec<u8>>,
+        removes: &BTreeSet<String>,
         durability: Durability,
     ) -> Result<(), N2xError> {
         let mutations: Vec<_> = values
             .iter()
-            .map(|(key, value)| n2x_kv::Mutation::Set { key, value })
+            .map(|(key, value)| n2x_kv::Mutation::Set {
+                key: key.as_str(),
+                value: value.as_slice(),
+            })
+            .chain(
+                removes
+                    .iter()
+                    .map(|key| n2x_kv::Mutation::Remove { key: key.as_str() }),
+            )
             .collect();
         if !mutations.is_empty() {
             self.store.write(&mutations).map_err(storage)?;
@@ -49,6 +61,109 @@ impl StateBackend for KvBackend {
         }
         Ok(())
     }
+}
+
+/// 把被回收运行的材料写成按运行命名的 JSONL 文件；成功后才允许从 KV 删除。
+pub struct NativeArchive {
+    directory: PathBuf,
+}
+impl NativeArchive {
+    /// 创建归档目录并确认目录项持久化。
+    pub fn open(directory: impl AsRef<Path>) -> Result<Self, N2xError> {
+        let directory = directory.as_ref().to_owned();
+        fs::create_dir_all(&directory).map_err(storage)?;
+        File::open(&directory)
+            .and_then(|file| file.sync_all())
+            .map_err(storage)?;
+        Ok(Self { directory })
+    }
+}
+impl RunArchive for NativeArchive {
+    fn append(&mut self, batch: &ArchiveBatch) -> Result<(), N2xError> {
+        let path = self.directory.join(archive_name(&batch.run));
+        if path.exists() {
+            // 上一次归档已完成、但 KV 删除未确认；重试保持幂等。
+            return Ok(());
+        }
+        let temp = self.directory.join(format!(
+            ".pending-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        if let Err(error) = write_archive(&temp, batch) {
+            let _ = fs::remove_file(&temp);
+            return Err(error);
+        }
+        fs::rename(&temp, &path).map_err(storage)?;
+        if let Err(error) = File::open(&self.directory).and_then(|file| file.sync_all()) {
+            // 目录项未确认持久化时不要留下一个“看起来已完成”的归档。
+            let _ = fs::remove_file(&path);
+            return Err(storage(error));
+        }
+        Ok(())
+    }
+}
+
+fn write_archive(path: &Path, batch: &ArchiveBatch) -> Result<(), N2xError> {
+    let mut file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(path)
+        .map_err(storage)?;
+    let header = serde_json::json!({
+        "format_version": 1,
+        "run": &batch.run,
+        "scope": &batch.scope,
+        "current": &batch.current,
+        "target": &batch.target,
+        "plan": batch.plan.map(digest_hex),
+        "retire_commit": &batch.retire_commit,
+        "archived_at": SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64,
+        "entries": batch.entries.len(),
+    });
+    write_json_line(&mut file, &header)?;
+    for entry in &batch.entries {
+        write_json_line(&mut file, entry)?;
+    }
+    file.sync_all().map_err(storage)?;
+    Ok(())
+}
+
+fn write_json_line<T: serde::Serialize>(file: &mut File, value: &T) -> Result<(), N2xError> {
+    serde_json::to_writer(&mut *file, value).map_err(storage)?;
+    file.write_all(b"\n").map_err(storage)?;
+    Ok(())
+}
+
+fn digest_hex(digest: Digest) -> String {
+    digest.0.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn archive_name(run: &RunId) -> String {
+    let digest = Sha256::digest(run.0.as_bytes());
+    let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+    let mut slug: String = run
+        .0
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .take(48)
+        .collect();
+    if slug.is_empty() {
+        slug.push_str("run");
+    }
+    format!("{slug}-{}.ndjson", &hex[..16])
 }
 
 /// 通过独立锁文件取得工作区进程级独占权；文件不会随 KV compact 替换。
@@ -103,7 +218,9 @@ impl Migrator {
     ) -> Result<Self, N2xError> {
         let mut lock = NativeLock::new(&directory);
         let guard = lock.try_acquire()?;
-        let workspace = StateWorkspace::new(KvBackend::open(&directory)?);
+        let archive = NativeArchive::open(directory.as_ref().join("archive"))?;
+        let workspace =
+            StateWorkspace::new(KvBackend::open(&directory)?).with_archive(Box::new(archive));
         Ok(Self::new(
             manifests,
             registry,

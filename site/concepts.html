@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>概念 — n2x</title>
+    <meta
+      name="description"
+      content="n2x 概念手册：Manifest、Step、Run、执行控制、Intent/Receipt、Workspace、事件与设计约束。"
+    />
+    <script>
+      try {
+        const t = localStorage.getItem("n2x-theme");
+        if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="style.css" />
+    <noscript><style>.reveal{opacity:1;transform:none}</style></noscript>
+  </head>
+  <body data-page="concepts">
+    <a class="skip-link" href="#main">跳到正文</a>
+    <header class="site-header">
+      <a class="brand" href="index.html" aria-label="n2x 首页">
+        <span class="brand-mark">n2x</span>
+        <span>migration engine</span>
+      </a>
+      <nav class="nav" id="nav" aria-label="主导航">
+        <a href="index.html" data-page="home">首页</a>
+        <a href="getting-started.html" data-page="start">开始</a>
+        <a href="examples.html" data-page="examples">示例</a>
+        <a href="concepts.html" data-page="concepts">概念</a>
+        <a href="notes.html" data-page="notes">注意</a>
+        <a class="nav-github" href="https://github.com/wwog/n2x" target="_blank" rel="noreferrer">GitHub ↗</a>
+      </nav>
+      <div class="header-actions">
+        <button class="icon-button" id="theme-toggle" type="button" aria-label="切换主题"></button>
+        <button class="icon-button menu-button" id="menu-toggle" type="button" aria-label="打开菜单" aria-expanded="false" aria-controls="nav">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
+            <path d="M4 7h16M4 12h16M4 17h16" />
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <main class="page" id="main">
+      <section class="doc-hero">
+        <p class="eyebrow">concepts</p>
+        <h1>概念手册</h1>
+        <p class="lead">
+          按使用顺序排列。每个概念先给用途和最小用法，细节放在展开项里；
+          设计约束集中在最后，便于查而不是挡在入门前面。
+        </p>
+        <div class="doc-meta">
+          <span class="pill accent">参考页</span>
+          <span class="pill">按需跳转</span>
+          <span class="pill">代码片段省略部分 use</span>
+        </div>
+      </section>
+
+      <div class="docs">
+        <aside class="sidebar">
+          <h4>索引</h4>
+          <nav>
+            <a href="#manifest">Manifest / Revision</a>
+            <a href="#step">Task / Transfer / Check</a>
+            <a href="#run">Run / Scope / Status</a>
+            <a href="#control">执行控制</a>
+            <a href="#recovery">Intent / Receipt</a>
+            <a href="#workspace">Workspace / 保留</a>
+            <a href="#events">事件</a>
+            <a href="#design">设计约束</a>
+          </nav>
+          <p class="side-note">
+            类型定义在
+            <a href="https://github.com/wwog/n2x/tree/main/crates/n2x-core/src" target="_blank" rel="noreferrer" style="color: var(--accent)">n2x-core/src</a>；
+            端口在
+            <a href="https://github.com/wwog/n2x/blob/main/crates/n2x-runtime/src/ports.rs" target="_blank" rel="noreferrer" style="color: var(--accent)">ports.rs</a>。
+          </p>
+        </aside>
+
+        <article class="prose">
+          <section id="manifest">
+            <h2>Manifest / Revision</h2>
+            <p><strong>用途：</strong>声明一条版本边，以及边内按顺序执行的步骤。</p>
+            <div class="code" data-lang="rust">
+              <pre>Manifest {
+    id: "import-users".into(),
+    from: "v0".into(),
+    to: "v1".into(),
+    steps: vec![
+        Step {
+            id: "create".into(),
+            kind: StepKind::Task(call("sql.create", &amp;["target"])),
+            policy: Default::default(),
+        },
+        Step {
+            id: "copy".into(),
+            kind: StepKind::Transfer(Box::new(spec)),
+            policy: Default::default(),
+        },
+        Step {
+            id: "verify".into(),
+            kind: StepKind::Check(call("users.verify", &amp;["target"])),
+            policy: Default::default(),
+        },
+    ],
+    metadata: Default::default(),
+}</pre>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <tr><th>字段</th><th>说明</th></tr>
+                <tr><td><code>from</code> / <code>to</code></td><td>版本标识。不推断数值大小，不自动生成反向边。</td></tr>
+                <tr><td><code>steps</code></td><td>顺序固定；全部确认后才推进到 <code>to</code>。</td></tr>
+                <tr><td><code>Route</code></td><td><code>Unique</code> 找唯一路径；<code>Explicit</code> 指定经过的边。</td></tr>
+                <tr><td>计划摘要</td><td>运行开始时冻结；恢复时重新编译并比较，不匹配返回 <code>PLAN_CHANGED</code>。</td></tr>
+              </table>
+            </div>
+            <details class="deep">
+              <summary>设计说明：为什么版本是图而不是一个函数</summary>
+              <p>
+                数据形态可能经历多次升级，也可能存在不同路径。把所有变化写进一个函数，
+                恢复时无法知道“当前应该执行到哪一段”。Manifest 把路径变成数据，
+                每一步都有稳定 ID，可以保存进度、重开和单独校验。
+              </p>
+            </details>
+          </section>
+
+          <section id="step">
+            <h2>Task / Transfer / Check</h2>
+            <p><strong>用途：</strong>把迁移拆成三种恢复语义不同的步骤。</p>
+            <div class="table-wrap">
+              <table>
+                <tr><th>类型</th><th>适合做什么</th><th>关键约束</th></tr>
+                <tr><td><code>Task</code></td><td>建表、发布、清理、执行一条 SQL</td><td>一次副作用；写入端必须能去重或对账</td></tr>
+                <tr><td><code>Transfer</code></td><td>读一批、可选转换、按单位写入</td><td>有界批次；游标只在整批确认后推进</td></tr>
+                <tr><td><code>Check</code></td><td>行数、约束、索引、文件内容校验</td><td>只读；失败阻止版本推进</td></tr>
+              </table>
+            </div>
+            <div class="code" data-lang="rust">
+              <pre>StepKind::Task(call("sql.create_users", &amp;["target"]))
+
+StepKind::Transfer(Box::new(TransferSpec {
+    read: stream("source", "users"),
+    transform: None,             // None = 直接传递 Envelope
+    write: stream("target", "users"),
+    consistency: ReadConsistency::Frozen,
+    read_limits: Default::default(),
+    write_limits: Default::default(),
+    invalid_data: Default::default(),
+}))
+
+StepKind::Check(call("users.verify", &amp;["target"]))</pre>
+            </div>
+            <details class="deep">
+              <summary>设计说明：为什么 Transfer 要冻结输出</summary>
+              <p>
+                读取批次和写入单位不是一回事。转换结果必须先固定下来，恢复时不能重新生成
+                不同的输出；否则同一个 OperationId 可能对应不同内容。批次完成后才推进游标，
+                部分写入只能推进已确认前缀。
+              </p>
+            </details>
+          </section>
+
+          <section id="run">
+            <h2>Run / Scope / Status</h2>
+            <p><strong>用途：</strong><code>Scope</code> 表示长期资源，<code>Run</code> 表示一次迁移尝试。</p>
+            <div class="code" data-lang="rust">
+              <pre>RunRequest {
+    run: "run-2026-11-06".into(),   // 一次尝试
+    scope: "account/42".into(),     // 资源实例
+    initial: Some("v0".into()),     // 首次引导时的版本
+    target: "v2".into(),
+    route: Route::Unique,
+    policy: Default::default(),
+}</pre>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <tr><th>状态</th><th>含义</th><th>下一步</th></tr>
+                <tr><td><code>Ready</code></td><td>计划已准备</td><td>开始 tick / run</td></tr>
+                <tr><td><code>Running</code></td><td>正在执行</td><td>继续 tick / run</td></tr>
+                <tr><td><code>Recovering</code></td><td>重开后验证现场</td><td>继续 tick / run</td></tr>
+                <tr><td><code>Waiting</code></td><td>等待重试或资源</td><td>按等待原因调度唤醒</td></tr>
+                <tr><td><code>Paused</code></td><td>安全边界暂停</td><td><code>Resume</code></td></tr>
+                <tr><td><code>NeedsAttention</code></td><td>存在未知结果</td><td>对账或人工确认</td></tr>
+                <tr><td><code>Completed</code></td><td>全部确认</td><td>读报告；按需回收</td></tr>
+                <tr><td><code>Failed</code></td><td>执行停止</td><td>修复后显式 <code>Resume</code></td></tr>
+                <tr><td><code>Cancelled</code></td><td>已停止后续工作</td><td>不隐含回滚；可显式继续</td></tr>
+              </table>
+            </div>
+            <p>
+              版本权威在 <code>ScopeState.current</code>；只有整条边的所有步骤确认后才更新。
+              失败、暂停、取消不会自动撤销已完成的业务写入。
+            </p>
+          </section>
+
+          <section id="control">
+            <h2>执行控制</h2>
+            <p><strong>用途：</strong>由宿主决定执行节奏。框架不启动线程，也不自己睡眠。</p>
+            <div class="code" data-lang="rust">
+              <pre>migrator.start(request).await?;
+
+// 一条命令：适合调试或宿主事件循环
+let _ = migrator.tick().await?;
+
+// 连续执行：内部循环 tick，直到没有待执行命令
+let report = migrator.run().await?;
+
+// 控制信号
+migrator.control(Control::Pause)?;
+migrator.control(Control::Resume)?;
+migrator.control(Control::Cancel)?;</pre>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <tr><th>API</th><th>粒度</th></tr>
+                <tr><td><code>tick</code></td><td>一条协议命令，包含持久化边界</td></tr>
+                <tr><td><code>run</code></td><td>连续 tick 到完成、暂停、失败或待处理</td></tr>
+                <tr><td><code>snapshot</code></td><td>最近已确认的运行视图</td></tr>
+                <tr><td><code>pending_command</code></td><td>下一条命令，仅用于显示或单步调试</td></tr>
+              </table>
+            </div>
+            <details class="deep">
+              <summary>设计说明：sans-IO 的边界</summary>
+              <p>
+                核心只产出 <code>Command</code>、接收 <code>Reply</code>。数据库、文件、平台时钟
+                都由宿主实现。这样同一套顺序逻辑可以跑在原生、Web 和测试里，也能把一次运行
+                拆成命令逐条重放。
+              </p>
+            </details>
+          </section>
+
+          <section id="recovery">
+            <h2>Intent / Receipt</h2>
+            <p><strong>用途：</strong>处理“目标端已经写入，但进程在拿到确认前退出”的窗口。</p>
+            <p>一次副作用按这个顺序执行：</p>
+            <div class="steps">
+              <div class="step-item">
+                <span class="step-num">1</span>
+                <div><h3>持久化 Intent</h3><p>请求、OperationId、request_digest 先写入工作区。</p></div>
+              </div>
+              <div class="step-item">
+                <span class="step-num">2</span>
+                <div><h3>执行 Apply</h3><p>写入端执行业务效果，并把去重凭证与业务写入放在同一个事务里。</p></div>
+              </div>
+              <div class="step-item">
+                <span class="step-num">3</span>
+                <div><h3>保存 Receipt 与检查点</h3><p>凭证、位置、计数和事件一次原子提交，然后才发下一步。</p></div>
+              </div>
+            </div>
+            <div class="code" data-lang="rust">
+              <pre>pub enum ReconcileResult {
+    Applied(Receipt),
+    NotApplied,
+    InFlight,
+    Unknown,
+}
+
+pub enum ApplyState {
+    NotApplied,
+    Applied(Receipt),
+    Unknown,
+}</pre>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <tr><th>结果</th><th>含义</th><th>处理</th></tr>
+                <tr><td><code>NotApplied</code></td><td>权威确认没有应用，也不会有迟到提交</td><td>按策略重试</td></tr>
+                <tr><td><code>Applied</code></td><td>凭证已知</td><td>接受凭证，推进检查点</td></tr>
+                <tr><td><code>Unknown</code></td><td>可能部分或全部应用</td><td>先 <code>reconcile</code>，不直接重放</td></tr>
+              </table>
+            </div>
+            <p>
+              写入端的义务：同一个 <code>OperationId</code> 重试时请求内容不变；
+              相同 ID 不同 <code>request_digest</code> 必须拒绝；去重凭证与业务效果原子保存；
+              <code>reconcile</code> 只能返回权威结果。
+            </p>
+            <details class="deep">
+              <summary>设计说明：为什么不用分布式事务</summary>
+              <p>
+                业务库和工作区不在同一个事务里，跨系统的“提交确认”本来就有未知窗口。
+                Intent/Receipt 把这个窗口变成显式状态，而不是假设它不存在。框架保证顺序和持久化，
+                具体幂等实现仍由适配器负责。
+              </p>
+            </details>
+          </section>
+
+          <section id="workspace">
+            <h2>Workspace / 保留</h2>
+            <p><strong>用途：</strong>保存版本、计划、恢复快照、提交凭证、事件和报告。</p>
+            <div class="table-wrap">
+              <table>
+                <tr><th>内容</th><th>默认</th></tr>
+                <tr><td>版本与绑定</td><td>每个 Scope 一份，覆盖写</td></tr>
+                <tr><td>计划 / 恢复快照 / 报告</td><td>每个 Run 一份，直到回收</td></tr>
+                <tr><td>提交收据</td><td>每个 Run 最近 128 条</td></tr>
+                <tr><td>事件</td><td>每个 Run 1,000 条；整个工作区 20,000 条</td></tr>
+                <tr><td>隔离记录</td><td>按 <code>(run, step, batch)</code> 保存，直到回收</td></tr>
+                <tr><td>归档</td><td>retire 前写入 <code>state/archive/*.ndjson</code></td></tr>
+              </table>
+            </div>
+            <div class="code" data-lang="rust">
+              <pre>let report = migrator.report(run.clone()).await?;
+
+migrator
+    .retire_run("retire-1".into(), run, true)
+    .await?;</pre>
+            </div>
+            <p>
+              一次 <code>WorkspaceCommit</code> 的所有变更和提交收据放在同一个 KV 帧里；
+              <code>Durable</code> 还要求 flush 成功。归档先于删除，归档失败时 KV 不变。
+            </p>
+            <details class="deep">
+              <summary>设计说明：为什么 KV 只放状态</summary>
+              <p>
+                KV 是可恢复存储，不是数据仓库。大批次、文件内容和隔离记录要么走 Blob，
+                要么在回收时写入归档。提交收据和历史事件有明确上限，避免长期运行把
+                小 KV 撑满。完整策略见 <a href="notes.html" style="color: var(--accent)">注意事项</a>。
+              </p>
+            </details>
+          </section>
+
+          <section id="events">
+            <h2>事件</h2>
+            <p><strong>用途：</strong>给 UI 或消费者提供进度和关键事实；恢复仍以持久检查点为准。</p>
+            <div class="table-wrap">
+              <table>
+                <tr><th>类型</th><th>语义</th></tr>
+                <tr><td><code>Notice</code></td><td>临时观察事实，可合并，不作为恢复依据</td></tr>
+                <tr><td><code>StoredNotice</code></td><td>与检查点原子保存；ID 为 <code>RunId + sequence</code></td></tr>
+                <tr><td><code>EventPage::Gap</code></td><td>请求位置早于保留历史；附当前快照</td></tr>
+                <tr><td><code>NoticeAck</code></td><td>订阅者已处理的连续前缀；接收者需对重发去重</td></tr>
+              </table>
+            </div>
+            <div class="code" data-lang="rust">
+              <pre>let page = migrator.events_after(run.clone(), last_seen, 100).await?;
+
+migrator
+    .subscribe("sub-1".into(), NoticeAck {
+        subscriber: "ui".into(),
+        run: run.clone(),
+        through_sequence: 0,
+    })
+    .await?;
+
+migrator
+    .acknowledge("ack-1".into(), NoticeAck {
+        subscriber: "ui".into(),
+        run: run.clone(),
+        through_sequence: 10,
+    })
+    .await?;</pre>
+            </div>
+            <p>
+              未确认事件不能被裁掉；容量满时提交返回背压，ACK 或回收旧运行后重试同一个 CommitId。
+            </p>
+          </section>
+
+          <section id="design">
+            <h2>设计约束</h2>
+            <p>这些约束决定了哪些行为由框架保证、哪些必须由适配器保证。</p>
+            <ul>
+              <li>外部副作用在 Intent 持久化之后才执行；下一条命令在凭证和检查点提交之后才发出。</li>
+              <li>相同 <code>CommitId</code> + 相同摘要可以重放；相同 ID 不同内容拒绝。</li>
+              <li>版本权威只在整条边完成后推进；失败、暂停、取消不自动回滚。</li>
+              <li>单写者模型；KV 没有 CAS，也没有跨进程租约。</li>
+              <li>写入端负责幂等或权威对账；框架只检查声明，不能替适配器实现。</li>
+              <li>KV 只保存恢复所需状态；历史有上限，回收前可写归档。</li>
+            </ul>
+            <div class="link-list">
+              <a href="https://github.com/wwog/n2x/blob/main/docs/architecture.zh-CN.md" target="_blank" rel="noreferrer">
+                <span><strong>架构与设计边界</strong> — 完整设计说明</span>
+                <span>docs →</span>
+              </a>
+              <a href="https://github.com/wwog/n2x/blob/main/docs/model.zh-CN.md" target="_blank" rel="noreferrer">
+                <span><strong>模型契约</strong> — 字段、状态和原子性</span>
+                <span>docs →</span>
+              </a>
+              <a href="https://github.com/wwog/n2x/blob/main/docs/implementation.zh-CN.md" target="_blank" rel="noreferrer">
+                <span><strong>实现与接入</strong> — 存储格式、恢复和归档</span>
+                <span>docs →</span>
+              </a>
+            </div>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <span class="footer-brand">
+        <span class="brand-mark" style="width: 28px; height: 28px; font-size: 0.68rem">n2x</span>
+        <span>© <span id="year">2026</span> n2x · MIT OR Apache-2.0</span>
+      </span>
+      <nav aria-label="文档链接">
+        <a href="https://github.com/wwog/n2x/blob/main/docs/architecture.zh-CN.md" target="_blank" rel="noreferrer">架构</a>
+        <a href="https://github.com/wwog/n2x/blob/main/docs/model.zh-CN.md" target="_blank" rel="noreferrer">模型契约</a>
+        <a href="https://github.com/wwog/n2x/blob/main/docs/implementation.zh-CN.md" target="_blank" rel="noreferrer">实现说明</a>
+        <a href="https://github.com/wwog/n2x" target="_blank" rel="noreferrer">GitHub</a>
+      </nav>
+    </footer>
+    <script src="app.js"></script>
+  </body>
+</html>

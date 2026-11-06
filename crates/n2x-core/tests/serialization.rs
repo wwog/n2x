@@ -164,6 +164,7 @@ fn atomic_workspace_commit_preserves_event_identity_and_ack() {
         id: "commit-1".into(),
         digest: Digest([9; 32]),
         durability: Durability::Durable,
+        owner: Some("run-1".into()),
         mutations: vec![
             WorkspaceMutation::AppendNotice(StoredNotice {
                 sequence: 4,

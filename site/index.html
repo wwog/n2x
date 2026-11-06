@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>n2x — Rust 数据迁移框架</title>
+    <meta
+      name="description"
+      content="n2x 是一个 Rust 数据迁移框架：顺序步骤、持久检查点、幂等写入和可重开执行。支持原生与 Web 组合。"
+    />
+    <script>
+      try {
+        const t = localStorage.getItem("n2x-theme");
+        if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="style.css" />
+    <noscript><style>.reveal{opacity:1;transform:none}</style></noscript>
+  </head>
+  <body data-page="home">
+    <a class="skip-link" href="#main">跳到正文</a>
+    <header class="site-header">
+      <a class="brand" href="index.html" aria-label="n2x 首页">
+        <span class="brand-mark">n2x</span>
+        <span>migration engine</span>
+      </a>
+      <nav class="nav" id="nav" aria-label="主导航">
+        <a href="index.html" data-page="home">首页</a>
+        <a href="getting-started.html" data-page="start">开始</a>
+        <a href="examples.html" data-page="examples">示例</a>
+        <a href="concepts.html" data-page="concepts">概念</a>
+        <a href="notes.html" data-page="notes">注意</a>
+        <a class="nav-github" href="https://github.com/wwog/n2x" target="_blank" rel="noreferrer">GitHub ↗</a>
+      </nav>
+      <div class="header-actions">
+        <button class="icon-button" id="theme-toggle" type="button" aria-label="切换主题"></button>
+        <button
+          class="icon-button menu-button"
+          id="menu-toggle"
+          type="button"
+          aria-label="打开菜单"
+          aria-expanded="false"
+          aria-controls="nav"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
+            <path d="M4 7h16M4 12h16M4 17h16" />
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <main class="page" id="main">
+      <section class="home-hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Rust · sans-IO · 可恢复</p>
+          <h1>数据迁移框架</h1>
+          <p class="lead">
+            n2x 把一次迁移拆成有顺序的步骤，并持久化每一步的进度、意图和提交凭证。
+            进程中断后从检查点继续；已经提交的写入不会重复执行。
+          </p>
+          <div class="hero-actions">
+            <a class="button primary" href="getting-started.html">
+              开始使用
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <path d="M5 12h14M13 6l6 6-6 6" />
+              </svg>
+            </a>
+            <a class="button ghost" href="examples.html">看示例</a>
+          </div>
+          <div class="hero-meta">
+            <span>Rust 2024</span>
+            <span>不绑定异步运行时</span>
+            <span>原生 / Web</span>
+          </div>
+        </div>
+
+        <div class="window reveal" aria-label="快速运行示例">
+          <div class="window-bar">
+            <i></i><i></i><i></i>
+            <span>terminal</span>
+          </div>
+          <pre><span class="c"># 启动本地 lab（JSON、SQLite、目录）</span>
+$ cargo run -p n2x-migration-lab
+<span class="ok">http://127.0.0.1:8427</span>
+
+<span class="c"># 或者直接跑四个示例测试</span>
+$ cargo test -p n2x-migration-lab --test scenarios
+running 4 tests
+scenario_simple_single_edge ... <span class="ok">ok</span>
+scenario_tick_pause_resume ... <span class="ok">ok</span>
+scenario_fault_and_recovery ... <span class="ok">ok</span>
+scenario_web_backend_flow ... <span class="ok">ok</span></pre>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="grid two">
+          <article class="card">
+            <span class="tag">适合</span>
+            <h3>需要断点续跑和明确提交边界的迁移</h3>
+            <ul class="plain-list">
+              <li>跨版本、多步骤的数据升级。</li>
+              <li>写入端可以做到幂等，或可以权威对账。</li>
+              <li>需要暂停、恢复、重启后继续。</li>
+              <li>原生与 Web 平台共用同一套调度逻辑。</li>
+            </ul>
+          </article>
+          <article class="card">
+            <span class="tag">不适合</span>
+            <h3>一次性脚本或跨系统分布式事务</h3>
+            <ul class="plain-list">
+              <li>失败后从头重跑也无所谓的任务。</li>
+              <li>需要两阶段提交或全局锁。</li>
+              <li>把 KV 当数据仓库或全量导出载体。</li>
+              <li>需要后台守护进程或多写者租约。</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">run it first</p>
+            <h2>先跑起来，再接自己的数据库。</h2>
+          </div>
+          <p class="lead" style="max-width: 420px">
+            lab 使用真实的 SQLite、JSON 和目录，不需要额外服务。
+          </p>
+        </div>
+        <div class="steps">
+          <div class="step-item reveal">
+            <span class="step-num">1</span>
+            <div>
+              <h3>启动 lab</h3>
+              <p>在仓库根目录执行，默认监听 127.0.0.1:8427。</p>
+              <div class="code" data-lang="sh">
+                <pre>cargo run -p n2x-migration-lab</pre>
+              </div>
+            </div>
+          </div>
+          <div class="step-item reveal">
+            <span class="step-num">2</span>
+            <div>
+              <h3>选择 v1，逐步执行</h3>
+              <p>
+                页面会显示建表、导入 JSON、搬迁目录、清理源目录和校验。
+                一个版本包含多个 Step，全部完成后才推进版本。
+              </p>
+              <div class="expected"><b>观察</b>
+建表 → 4 条用户 → a/ 复制到 b/ → 删除 a/ → 校验</div>
+            </div>
+          </div>
+          <div class="step-item reveal">
+            <span class="step-num">3</span>
+            <div>
+              <h3>查看状态</h3>
+              <p>页面同时显示权威版本、SQL user_version、运行状态和实际数据。</p>
+              <div class="expected"><b>预期</b>
+version       v1
+sql_version   1
+users         4 行
+files.a       false
+files.b       4 项</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">examples</p>
+            <h2>四个可以单独运行的示例。</h2>
+          </div>
+          <a class="button ghost" href="examples.html">全部示例 →</a>
+        </div>
+        <div class="grid four">
+          <a class="card link reveal" href="examples.html#simple">
+            <span class="tag">simple</span>
+            <h3>单条版本边</h3>
+            <p>v0 → v1：建表、导入 JSON、搬迁目录、校验。</p>
+            <span class="arrow">看代码和断言 →</span>
+          </a>
+          <a class="card link reveal" href="examples.html#control">
+            <span class="tag">control</span>
+            <h3>逐步执行与暂停</h3>
+            <p>区分一次命令和一次业务步骤，观察暂停、恢复后的版本。</p>
+            <span class="arrow">看执行序列 →</span>
+          </a>
+          <a class="card link reveal" href="examples.html#fault">
+            <span class="tag">recovery</span>
+            <h3>故障与重开</h3>
+            <p>注入一次写入回滚，恢复后从失败处继续，再重开执行器。</p>
+            <span class="arrow">看恢复过程 →</span>
+          </a>
+          <a class="card link reveal" href="examples.html#web">
+            <span class="tag">web</span>
+            <h3>网页后端流程</h3>
+            <p>state / start / step / reopen / fault / resume / reset 的实际顺序。</p>
+            <span class="arrow">看 HTTP 流程 →</span>
+          </a>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">docs</p>
+            <h2>文档入口</h2>
+          </div>
+        </div>
+        <div class="grid three">
+          <a class="card link" href="getting-started.html">
+            <h3>开始使用</h3>
+            <p>从运行 lab 到写自己的 Manifest、端口和执行入口。</p>
+            <span class="arrow">入门 →</span>
+          </a>
+          <a class="card link" href="concepts.html">
+            <h3>概念</h3>
+            <p>Manifest、Step、Run、Intent、Workspace、事件的可查手册。</p>
+            <span class="arrow">按导航阅读 →</span>
+          </a>
+          <a class="card link" href="notes.html">
+            <h3>注意事项</h3>
+            <p>容量、保留、归档、持久级别、写入端契约和单写者边界。</p>
+            <span class="arrow">看边界 →</span>
+          </a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span class="footer-brand">
+        <span class="brand-mark" style="width: 28px; height: 28px; font-size: 0.68rem">n2x</span>
+        <span>© <span id="year">2026</span> n2x · MIT OR Apache-2.0</span>
+      </span>
+      <nav aria-label="文档链接">
+        <a href="https://github.com/wwog/n2x/blob/main/docs/architecture.zh-CN.md" target="_blank" rel="noreferrer">架构</a>
+        <a href="https://github.com/wwog/n2x/blob/main/docs/model.zh-CN.md" target="_blank" rel="noreferrer">模型契约</a>
+        <a href="https://github.com/wwog/n2x/blob/main/docs/implementation.zh-CN.md" target="_blank" rel="noreferrer">实现说明</a>
+        <a href="https://github.com/wwog/n2x" target="_blank" rel="noreferrer">GitHub</a>
+      </nav>
+    </footer>
+    <script src="app.js"></script>
+  </body>
+</html>

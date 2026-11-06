@@ -2,7 +2,7 @@
 use n2x_core::*;
 use n2x_runtime::*;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     future::Future,
     sync::Arc,
     task::{Context, Poll, Wake, Waker},
@@ -26,10 +26,19 @@ fn block_on<F: Future>(future: F) -> F::Output {
     }
 }
 fn commit(id: &str, mutations: Vec<WorkspaceMutation>, durability: Durability) -> WorkspaceCommit {
+    owned_commit(id, None, mutations, durability)
+}
+fn owned_commit(
+    id: &str,
+    owner: Option<&str>,
+    mutations: Vec<WorkspaceMutation>,
+    durability: Durability,
+) -> WorkspaceCommit {
     let mut value = WorkspaceCommit {
         id: id.into(),
         digest: Digest([0; 32]),
         durability,
+        owner: owner.map(RunId::from),
         mutations,
     };
     value.digest = codec::commit_digest(&value).unwrap();
@@ -88,8 +97,24 @@ impl StateBackend for FlushOnce {
     fn get(&self, key: &str) -> Result<Option<Vec<u8>>, N2xError> {
         Ok(self.values.get(key).cloned())
     }
-    fn write(&mut self, values: &BTreeMap<String, Vec<u8>>, _: Durability) -> Result<(), N2xError> {
+    fn keys(&self, prefix: &str) -> Result<Vec<String>, N2xError> {
+        Ok(self
+            .values
+            .keys()
+            .filter(|key| key.starts_with(prefix))
+            .cloned()
+            .collect())
+    }
+    fn write(
+        &mut self,
+        values: &BTreeMap<String, Vec<u8>>,
+        removes: &BTreeSet<String>,
+        _: Durability,
+    ) -> Result<(), N2xError> {
         self.values.extend(values.clone());
+        for key in removes {
+            self.values.remove(key);
+        }
         if !self.failed {
             self.failed = true;
             Err(N2xError::new(
@@ -325,4 +350,573 @@ fn native_entry_locks_before_opening_state() {
     drop(first);
     drop(Migrator::open_native(&directory, vec![], Registry::default()).unwrap());
     std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[derive(Clone, Default)]
+struct Shared(Arc<std::sync::Mutex<BTreeMap<String, Vec<u8>>>>);
+impl Shared {
+    fn keys(&self, prefix: &str) -> Vec<String> {
+        self.0
+            .lock()
+            .unwrap()
+            .keys()
+            .filter(|key| key.starts_with(prefix))
+            .cloned()
+            .collect()
+    }
+}
+impl StateBackend for Shared {
+    fn get(&self, key: &str) -> Result<Option<Vec<u8>>, N2xError> {
+        Ok(self.0.lock().unwrap().get(key).cloned())
+    }
+    fn keys(&self, prefix: &str) -> Result<Vec<String>, N2xError> {
+        Ok(Shared::keys(self, prefix))
+    }
+    fn write(
+        &mut self,
+        values: &BTreeMap<String, Vec<u8>>,
+        removes: &BTreeSet<String>,
+        _: Durability,
+    ) -> Result<(), N2xError> {
+        let mut guard = self.0.lock().unwrap();
+        guard.extend(values.clone());
+        for key in removes {
+            guard.remove(key);
+        }
+        Ok(())
+    }
+}
+
+fn terminal_snapshot(run: &str, scope: &str) -> RunSnapshot {
+    RunSnapshot {
+        run: run.into(),
+        scope: scope.into(),
+        plan: Digest([1; 32]),
+        status: RunStatus::Completed,
+        current: "v1".into(),
+        target: "v1".into(),
+        step: None,
+        progress: Progress::default(),
+        last_sequence: 0,
+        last_error: None,
+    }
+}
+fn plan_for(scope: &str, from: &str, to: &str) -> PlanSnapshot {
+    let mut plan = PlanSnapshot {
+        format_version: MODEL_VERSION,
+        scope: scope.into(),
+        from: from.into(),
+        to: to.into(),
+        route: vec![],
+        bindings: vec![],
+        policy: RunPolicy::default(),
+        digest: Digest([0; 32]),
+    };
+    plan.digest = codec::plan_digest(&plan).unwrap();
+    plan
+}
+fn recovery_for(snapshot: &RunSnapshot) -> RecoverySnapshot {
+    RecoverySnapshot {
+        format_version: MODEL_VERSION,
+        epoch: 1,
+        run: snapshot.clone(),
+        checkpoint: Checkpoint {
+            position: ExecutionPosition::Finished,
+            transfer: None,
+            confirmed: Counters::default(),
+        },
+        pending: None,
+        started_at: Timestamp(0),
+    }
+}
+fn report_for(snapshot: &RunSnapshot) -> RunReport {
+    RunReport {
+        snapshot: snapshot.clone(),
+        outcome: RunOutcome::Completed,
+        started_at: Timestamp(0),
+        finished_at: Timestamp(1),
+        evidence: None,
+    }
+}
+fn notice_for(run: &str, sequence: u64) -> WorkspaceMutation {
+    WorkspaceMutation::AppendNotice(StoredNotice {
+        sequence,
+        notice: Notice {
+            run: run.into(),
+            scope: "s".into(),
+            at: Timestamp(0),
+            kind: NoticeKind::RunStarted,
+        },
+    })
+}
+fn closed_scope(run: Option<&str>) -> ScopeState {
+    ScopeState {
+        scope: "s".into(),
+        current: "v1".into(),
+        active_run: run.map(RunId::from),
+        bindings: vec![],
+        last_revision_commit: None,
+    }
+}
+
+#[test]
+fn commit_receipts_are_bounded_per_run() {
+    block_on(async {
+        let backend = Shared::default();
+        let probe = backend.clone();
+        let mut workspace = StateWorkspace::new(backend).with_commit_retention(2);
+        for index in 1..=4 {
+            workspace
+                .commit(owned_commit(
+                    &format!("c{index}"),
+                    Some("r1"),
+                    vec![],
+                    Durability::Memory,
+                ))
+                .await
+                .unwrap();
+        }
+        let receipts = probe.keys("n2x/v1/commit/");
+        assert_eq!(receipts.len(), 2);
+        assert!(receipts.iter().any(|key| key.ends_with("\"c3\"")));
+        assert!(receipts.iter().any(|key| key.ends_with("\"c4\"")));
+        let log: Vec<CommitId> = serde_json::from_slice(
+            &probe
+                .get("n2x/v1/commit-log/\"r1\"")
+                .unwrap()
+                .expect("commit log"),
+        )
+        .unwrap();
+        assert_eq!(log, vec![CommitId::from("c3"), CommitId::from("c4")]);
+    })
+}
+
+#[test]
+fn retire_run_reclaims_material_and_can_drop_the_report() {
+    block_on(async {
+        let backend = Shared::default();
+        let probe = backend.clone();
+        let mut workspace = StateWorkspace::new(backend);
+        let snapshot = terminal_snapshot("r1", "s");
+        workspace
+            .commit(owned_commit(
+                "boot",
+                Some("r1"),
+                vec![
+                    WorkspaceMutation::SavePlan {
+                        run: "r1".into(),
+                        plan: Box::new(plan_for("s", "v0", "v1")),
+                    },
+                    WorkspaceMutation::SaveScope(closed_scope(Some("r1"))),
+                    WorkspaceMutation::SaveRecovery(Box::new(recovery_for(&snapshot))),
+                    WorkspaceMutation::SaveReport(Box::new(report_for(&snapshot))),
+                    notice_for("r1", 1),
+                    WorkspaceMutation::Quarantine {
+                        run: "r1".into(),
+                        step: StepAddress {
+                            manifest: "m".into(),
+                            step: "s".into(),
+                        },
+                        batch: 0,
+                        records: vec![],
+                    },
+                ],
+                Durability::Memory,
+            ))
+            .await
+            .unwrap();
+        workspace
+            .commit(owned_commit(
+                "done",
+                Some("r1"),
+                vec![WorkspaceMutation::SaveScope(closed_scope(None))],
+                Durability::Memory,
+            ))
+            .await
+            .unwrap();
+        assert!(
+            workspace
+                .commit(owned_commit(
+                    "retire",
+                    Some("r1"),
+                    vec![WorkspaceMutation::RetireRun {
+                        run: "r1".into(),
+                        keep_report: true,
+                    }],
+                    Durability::Memory,
+                ))
+                .await
+                .is_ok()
+        );
+        assert!(workspace.plan("r1".into()).await.unwrap().is_none());
+        assert!(workspace.load("r1".into()).await.unwrap().is_none());
+        assert!(workspace.report("r1".into()).await.unwrap().is_some());
+        for prefix in [
+            "n2x/v1/commit/",
+            "n2x/v1/commit-log/",
+            "n2x/v1/events/",
+            "n2x/v1/plan/",
+            "n2x/v1/quarantine/",
+            "n2x/v1/recovery/",
+            "n2x/v1/subscribers/",
+        ] {
+            assert!(
+                probe.keys(prefix).is_empty(),
+                "leftover keys under {prefix}"
+            );
+        }
+        workspace
+            .commit(owned_commit(
+                "retire-report",
+                Some("r1"),
+                vec![WorkspaceMutation::RetireRun {
+                    run: "r1".into(),
+                    keep_report: false,
+                }],
+                Durability::Memory,
+            ))
+            .await
+            .unwrap();
+        assert!(workspace.report("r1".into()).await.unwrap().is_none());
+    })
+}
+
+#[test]
+fn retire_run_refuses_active_or_subscribed_runs() {
+    block_on(async {
+        let backend = Shared::default();
+        let mut workspace = StateWorkspace::new(backend);
+        let snapshot = terminal_snapshot("active", "s");
+        workspace
+            .commit(commit(
+                "active",
+                vec![
+                    WorkspaceMutation::SaveScope(closed_scope(Some("active"))),
+                    WorkspaceMutation::SaveRecovery(Box::new(recovery_for(&snapshot))),
+                ],
+                Durability::Memory,
+            ))
+            .await
+            .unwrap();
+        let error = workspace
+            .commit(commit(
+                "retire-active",
+                vec![WorkspaceMutation::RetireRun {
+                    run: "active".into(),
+                    keep_report: true,
+                }],
+                Durability::Memory,
+            ))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code.0, "n2x.workspace.conflict");
+
+        let subscribed = terminal_snapshot("subscribed", "s");
+        workspace
+            .commit(commit(
+                "subscribed",
+                vec![
+                    WorkspaceMutation::SaveScope(closed_scope(None)),
+                    WorkspaceMutation::SaveRecovery(Box::new(recovery_for(&subscribed))),
+                    WorkspaceMutation::SubscribeNotice(NoticeAck {
+                        subscriber: "ui".into(),
+                        run: "subscribed".into(),
+                        through_sequence: 0,
+                    }),
+                ],
+                Durability::Memory,
+            ))
+            .await
+            .unwrap();
+        let error = workspace
+            .commit(commit(
+                "retire-subscribed",
+                vec![WorkspaceMutation::RetireRun {
+                    run: "subscribed".into(),
+                    keep_report: true,
+                }],
+                Durability::Memory,
+            ))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code.0, "n2x.workspace.conflict");
+    })
+}
+
+#[test]
+fn global_event_budget_blocks_until_runs_are_retired() {
+    block_on(async {
+        let backend = Shared::default();
+        let mut workspace = StateWorkspace::new(backend)
+            .with_event_limit(10)
+            .with_event_budget(3);
+        let snapshot = terminal_snapshot("r1", "s");
+        workspace
+            .commit(owned_commit(
+                "boot",
+                Some("r1"),
+                vec![
+                    WorkspaceMutation::SaveScope(closed_scope(None)),
+                    WorkspaceMutation::SaveRecovery(Box::new(recovery_for(&snapshot))),
+                ],
+                Durability::Memory,
+            ))
+            .await
+            .unwrap();
+        for sequence in 1..=3 {
+            workspace
+                .commit(commit(
+                    &format!("e{sequence}"),
+                    vec![notice_for("r1", sequence)],
+                    Durability::Memory,
+                ))
+                .await
+                .unwrap();
+        }
+        let error = workspace
+            .commit(commit("e4", vec![notice_for("r1", 4)], Durability::Memory))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code.0, "n2x.notice.backpressure");
+        workspace
+            .commit(owned_commit(
+                "retire",
+                Some("r1"),
+                vec![WorkspaceMutation::RetireRun {
+                    run: "r1".into(),
+                    keep_report: true,
+                }],
+                Durability::Memory,
+            ))
+            .await
+            .unwrap();
+        for sequence in 1..=3 {
+            workspace
+                .commit(commit(
+                    &format!("r2-{sequence}"),
+                    vec![notice_for("r2", sequence)],
+                    Durability::Memory,
+                ))
+                .await
+                .unwrap();
+        }
+        assert!(
+            workspace
+                .commit(commit(
+                    "r2-4",
+                    vec![notice_for("r2", 4)],
+                    Durability::Memory
+                ))
+                .await
+                .is_err()
+        );
+    })
+}
+
+#[derive(Clone, Default)]
+struct RecordArchive(Arc<std::sync::Mutex<Vec<ArchiveBatch>>>);
+impl RunArchive for RecordArchive {
+    fn append(&mut self, batch: &ArchiveBatch) -> Result<(), N2xError> {
+        self.0.lock().unwrap().push(batch.clone());
+        Ok(())
+    }
+}
+
+struct FailArchive;
+impl RunArchive for FailArchive {
+    fn append(&mut self, _: &ArchiveBatch) -> Result<(), N2xError> {
+        Err(N2xError::new(
+            "test.archive",
+            ErrorKind::Persistence,
+            ErrorOrigin::Workspace,
+            "simulated archive failure",
+        ))
+    }
+}
+
+async fn boot_completed_run<B: StateBackend>(
+    workspace: &mut StateWorkspace<B>,
+    run: &str,
+    durability: Durability,
+) {
+    let snapshot = terminal_snapshot(run, "s");
+    workspace
+        .commit(owned_commit(
+            &format!("{run}-boot"),
+            Some(run),
+            vec![
+                WorkspaceMutation::SavePlan {
+                    run: run.into(),
+                    plan: Box::new(plan_for("s", "v0", "v1")),
+                },
+                WorkspaceMutation::SaveScope(closed_scope(Some(run))),
+                WorkspaceMutation::SaveRecovery(Box::new(recovery_for(&snapshot))),
+                WorkspaceMutation::SaveReport(Box::new(report_for(&snapshot))),
+                notice_for(run, 1),
+                WorkspaceMutation::Quarantine {
+                    run: run.into(),
+                    step: StepAddress {
+                        manifest: "m".into(),
+                        step: "s".into(),
+                    },
+                    batch: 0,
+                    records: vec![],
+                },
+            ],
+            durability,
+        ))
+        .await
+        .unwrap();
+    workspace
+        .commit(owned_commit(
+            &format!("{run}-done"),
+            Some(run),
+            vec![WorkspaceMutation::SaveScope(closed_scope(None))],
+            durability,
+        ))
+        .await
+        .unwrap();
+}
+
+#[test]
+fn retire_run_archives_material_before_delete() {
+    block_on(async {
+        let backend = Shared::default();
+        let probe = backend.clone();
+        let archive = RecordArchive::default();
+        let batches = archive.0.clone();
+        let mut workspace = StateWorkspace::new(backend).with_archive(Box::new(archive));
+        boot_completed_run(&mut workspace, "r1", Durability::Memory).await;
+        workspace
+            .commit(owned_commit(
+                "retire",
+                Some("r1"),
+                vec![WorkspaceMutation::RetireRun {
+                    run: "r1".into(),
+                    keep_report: true,
+                }],
+                Durability::Memory,
+            ))
+            .await
+            .unwrap();
+
+        let batches = batches.lock().unwrap();
+        assert_eq!(batches.len(), 1);
+        let batch = &batches[0];
+        assert_eq!(batch.run, RunId::from("r1"));
+        assert_eq!(batch.scope, Some(ScopeId::from("s")));
+        assert_eq!(batch.current, Some(Revision::from("v1")));
+        assert_eq!(batch.target, Some(Revision::from("v1")));
+        assert!(batch.plan.is_some());
+        for kind in [
+            "plan",
+            "recovery",
+            "report",
+            "events",
+            "quarantine",
+            "commit-log",
+            "commit",
+        ] {
+            assert!(
+                batch.entries.iter().any(|entry| entry.kind == kind),
+                "archive is missing {kind}"
+            );
+        }
+        let report = batch
+            .entries
+            .iter()
+            .find(|entry| entry.kind == "report")
+            .unwrap();
+        assert_eq!(report.value["outcome"].as_str(), Some("Completed"));
+        assert!(probe.keys("n2x/v1/plan/").is_empty());
+    })
+}
+
+#[test]
+fn archive_failure_keeps_run_material_intact() {
+    block_on(async {
+        let backend = Shared::default();
+        let probe = backend.clone();
+        let mut workspace = StateWorkspace::new(backend).with_archive(Box::new(FailArchive));
+        boot_completed_run(&mut workspace, "r1", Durability::Memory).await;
+        let error = workspace
+            .commit(owned_commit(
+                "retire",
+                Some("r1"),
+                vec![WorkspaceMutation::RetireRun {
+                    run: "r1".into(),
+                    keep_report: true,
+                }],
+                Durability::Memory,
+            ))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code.0, "test.archive");
+        assert!(workspace.load("r1".into()).await.unwrap().is_some());
+        assert!(workspace.report("r1".into()).await.unwrap().is_some());
+        assert!(!probe.keys("n2x/v1/plan/").is_empty());
+        assert!(!probe.keys("n2x/v1/events/").is_empty());
+        assert!(!probe.keys("n2x/v1/quarantine/").is_empty());
+    })
+}
+
+#[test]
+fn native_archive_writes_jsonl_before_deleting_report() {
+    block_on(async {
+        let directory = std::env::temp_dir().join(format!(
+            "n2x-archive-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let archive_dir = directory.join("archive");
+        let backend = KvBackend::open(&directory).unwrap();
+        let mut workspace = StateWorkspace::new(backend)
+            .with_archive(Box::new(NativeArchive::open(&archive_dir).unwrap()));
+        boot_completed_run(&mut workspace, "r1", Durability::Durable).await;
+        workspace
+            .commit(owned_commit(
+                "retire",
+                Some("r1"),
+                vec![WorkspaceMutation::RetireRun {
+                    run: "r1".into(),
+                    keep_report: false,
+                }],
+                Durability::Durable,
+            ))
+            .await
+            .unwrap();
+        assert!(workspace.report("r1".into()).await.unwrap().is_none());
+
+        let mut files: Vec<_> = std::fs::read_dir(&archive_dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        assert_eq!(files.len(), 1);
+        assert_eq!(
+            files[0].extension().and_then(|ext| ext.to_str()),
+            Some("ndjson")
+        );
+        let text = std::fs::read_to_string(files.pop().unwrap()).unwrap();
+        let lines: Vec<serde_json::Value> = text
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(lines[0]["format_version"].as_u64(), Some(1));
+        assert_eq!(lines[0]["run"].as_str(), Some("r1"));
+        assert_eq!(lines[0]["current"].as_str(), Some("v1"));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line["kind"].as_str() == Some("report"))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|line| line["kind"].as_str() == Some("events"))
+        );
+        drop(workspace);
+        std::fs::remove_dir_all(directory).unwrap();
+    })
 }

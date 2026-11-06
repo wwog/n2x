@@ -75,7 +75,9 @@ impl Migrator {
                 return self.recover_state(state).await;
             }
         }
-        if self.workspace.plan(request.run.clone()).await?.is_some() {
+        if self.workspace.plan(request.run.clone()).await?.is_some()
+            || self.workspace.report(request.run.clone()).await?.is_some()
+        {
             return Err(conflict("RunId already exists"));
         }
         let current = scope
@@ -270,6 +272,21 @@ impl Migrator {
             .await
     }
 
+    /// 回收一个已完成运行留在 KV 里的恢复材料。
+    ///
+    /// 调用前应已读取或导出报告，并已 `unsubscribe` 所有可靠订阅者。默认保留报告，
+    /// 用作结果与 RunId 墓碑；显式传入 `keep_report = false` 可连报告一起删除。
+    /// 暂停、失败、取消或待处理的运行保留现场，调用会返回冲突。
+    pub async fn retire_run(
+        &mut self,
+        id: CommitId,
+        run: RunId,
+        keep_report: bool,
+    ) -> Result<(), N2xError> {
+        self.notice_mutation(id, WorkspaceMutation::RetireRun { run, keep_report })
+            .await
+    }
+
     async fn notice_mutation(
         &mut self,
         id: CommitId,
@@ -278,10 +295,19 @@ impl Migrator {
         if self.guard.is_none() {
             self.guard = Some(self.lock.acquire().await?);
         }
+        let owner = match &mutation {
+            WorkspaceMutation::AckNotice(ack) | WorkspaceMutation::SubscribeNotice(ack) => {
+                Some(ack.run.clone())
+            }
+            WorkspaceMutation::UnsubscribeNotice { run, .. }
+            | WorkspaceMutation::RetireRun { run, .. } => Some(run.clone()),
+            _ => None,
+        };
         let mut commit = WorkspaceCommit {
             id,
             digest: Digest([0; 32]),
             durability: self.durability,
+            owner,
             mutations: vec![mutation],
         };
         commit.digest = codec::commit_digest(&commit)?;

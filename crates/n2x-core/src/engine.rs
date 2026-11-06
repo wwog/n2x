@@ -115,6 +115,7 @@ impl Engine {
             .into(),
             digest: Digest([0; 32]),
             durability: self.plan().policy.durability,
+            owner: Some(self.state().run.run.clone()),
             mutations: extra,
         };
         commit.digest = codec::commit_digest(&commit)?;

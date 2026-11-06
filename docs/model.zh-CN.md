@@ -111,6 +111,7 @@ ReplaySafety 支持 Unsafe、Idempotent、Deduplicated。去重必须和业务�
 
 WorkspaceCommit 的全部 mutations 和去重凭证必须原子保存。flush 失败不代表没执行。
 重试沿用原 CommitId，或重开核对现场；确认前停止新业务副作用。
+`owner` 把提交收据归入对应运行的有界队列；收据只服务于重试去重，可以被裁剪。
 Durability::Memory 不得标注为持久可恢复运行。
 
 ## 5. 恢复快照
@@ -178,8 +179,9 @@ Failed、Cancelled。RunSnapshot 区分 observed 与 confirmed。持久快照只
 - EventPage::Gap 表示历史已过期，附当前快照。
 - NoticeAck 按订阅者确认连续事件前缀，接收者需对重发去重。
 - `subscribe` 注册累计起点，`acknowledge` 确认连续前缀，`unsubscribe` 释放保护。
-- StateWorkspace 默认每个运行保留 1000 条事件，可调；未确认事件不能被裁剪，满时返回
-  `n2x.notice.backpressure`，ACK 后 tick 重试原 CommitId。起点过期的订阅注册会拒绝。
+- StateWorkspace 默认每个运行保留 1000 条事件、全工作区 20_000 条，可调；未确认事件
+  不能被裁剪，满时返回 `n2x.notice.backpressure`，ACK 或回收旧运行后重试原 CommitId。
+  起点过期的订阅注册会拒绝。
 - 事件传输由调用方拉取，通知消费者去重；框架不内置网络推送或后台投递进程。
 
 ## 8. 异步与平台
@@ -202,4 +204,8 @@ Unknown 不允许借 Resume 绕过安全恢复契约。
 
 Engine 同时限制转换输出条数与内联字节（使用 read_limits 作为 TransformRequest.limits），
 再按 write_limits 拆提交单位。适配器也须在生成结果时遵守界限。
-工作区事务收据目前保留至工作区删除，不自动回收。Native KV 容量耗尽时返回错误并保留现场。
+工作区事务收据默认每个运行只保留最近 128 条，更早的收据由实现裁剪；重复执行只会重复
+幂等 mutation。已完成运行可经 `RetireRun` 回收计划、恢复快照、事件、隔离记录和收据，
+报告默认保留为 RunId 墓碑。实现可以在删除前把这些材料写入外部归档；归档失败应中止
+回收并保留现场。活动、暂停、失败、取消或仍有订阅者的运行不会被回收。
+Native KV 容量耗尽时返回错误并保留现场。

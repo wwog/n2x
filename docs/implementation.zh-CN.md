@@ -67,6 +67,7 @@ NativeClock 由外部提供时间和唤醒，Engine 本身不睡眠。
 state_dir/
   workspace.lock    独立锁文件，不随 KV compact 替换
   state.kv          n2x-kv 原子状态与提交收据
+  archive/          retire 前写出的 JSONL 运行归档
 spool_dir/          可选 NativeBlobStore，显式配置并由适配器使用
 cache_dir/          应用自己的可清除缓存，不保存恢复必需材料
 ```
@@ -81,15 +82,32 @@ SQL user_version 可以作为业务 Task 更新和 Check 校验；它可能在�
 取消只停止后续工作，显式 Resume 可以继续，不代表自动回滚。
 
 NativeBlobStore 支持流式追加、持久冻结、范围读取与摘要验证。引用存在时由应用负责保留；
-不自动回收恢复/隔离材料。范围读取会扫描摘要，内存有界。默认 KV 为 64 MiB，单值和事务
+不自动回收 Blob 与 spool 材料。范围读取会扫描摘要，内存有界。默认 KV 为 64 MiB，单值和事务
 仍受 n2x-kv 限制；超限返回错误，不拆分原子事务或删除现场。可自行组合带 StoreOptions
-的后端。提交收据和隔离记录暂不自动清理。
+的后端。工作区默认每个运行只保留最近 128 条提交收据（`with_commit_retention`），
+事件默认每个运行 1000 条、整个工作区 20_000 条（`with_event_budget`），超限返回背压。
+已完成运行应在读取或导出报告后调用 `Migrator::retire_run`，回收计划、恢复快照、事件、
+隔离记录和提交收据；默认保留报告作为 RunId 墓碑，`keep_report = false` 可一并删除。
+原生组合会先把同一批材料写入 `archive/<run>-<hash>.ndjson` 并 fsync，成功后才删除 KV；
+归档失败时提交返回错误，KV 现场保持不变。归档文件按运行幂等，重试不会重复写入。
+活动、暂停、失败、取消或仍有可靠订阅者的运行保留现场，不会被回收。
+
+归档是 JSONL：第一行是运行头，后续每行是一个被删除的键值。`value` 保留工作区的
+JSON 形态，不再拆解业务字段；隔离记录会原样进入归档。
+
+```text
+{"format_version":1,"run":...,"scope":...,"current":...,"target":...,"plan":"<hex>","retire_commit":...,"archived_at":...,"entries":N}
+{"kind":"plan|recovery|report|events|quarantine|commit-log|commit","key":"n2x/v1/...","value":...}
+...
+```
 
 ## 5. 通知与控制
 
 `snapshot` 返回最近已确认视图，`drain_notices` 取得本执行器确认后的事件。
 `events_after(run, after, limit)` 从持久事件按页补读。默认每个运行保留 1000 条，可通过
-`StateWorkspace::with_event_limit` 调整。过期位置返回带快照的 EventPage::Gap。
+`StateWorkspace::with_event_limit` 调整；全工作区默认 20_000 条，可通过
+`with_event_budget` 调整。过期位置返回带快照的 EventPage::Gap。
+事件预算与总收据裁剪都在同一个提交里原子更新；超限不会写入半批事件。
 
 可靠订阅使用：
 
