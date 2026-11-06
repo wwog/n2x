@@ -158,6 +158,36 @@ assert!(state.type_of("profile").is_some());
 
 `AnyStore` needs no serde, no `Clone`, and has no capacity limit, at the cost of being process-local: it cannot be persisted and does not cross FFI. Values must be `Any + Send + Sync`; borrowed types (`&'a str`, slice references) cannot be stored and must be made self-owning first.
 
+## Inspecting a file
+
+`n2x_kv::read_snapshot(path)` scans a store file read-only and returns the live
+keys in lexicographic order. It does not open `Store`, take the in-process path
+claim, compact, or truncate a torn tail, so it is safe to point at a file that
+another process is appending to:
+
+```rust
+let snapshot = n2x_kv::read_snapshot("/tmp/demo.kv")?;
+for entry in &snapshot.entries {
+    println!(
+        "{} = {:?} ({} updates)",
+        entry.key,
+        String::from_utf8_lossy(&entry.value),
+        entry.updates
+    );
+}
+```
+
+The `n2x-kv` CLI wraps it for tables and exports:
+
+```sh
+cargo run -p n2x-kv-cli -- /tmp/demo.kv               # aligned table
+cargo run -p n2x-kv-cli -- /tmp/demo.kv --format kv   # key = value
+cargo run -p n2x-kv-cli -- /tmp/demo.kv --format json # structured JSON
+```
+
+See [n2x-kv-cli](../n2x-kv-cli/README.md) for flags, escaping rules, and output
+examples.
+
 ## API overview
 
 ### `Store` (file)
@@ -184,6 +214,10 @@ assert!(state.type_of("profile").is_some());
 ### `AnyStore` (in-memory dynamic types)
 
 `get<T>`, `set<T>`, `get_str` / `set_str`, `get_u32`, `get_u64`, `get_i64`, `get_f64`, `get_bool`, `contains`, `type_of`, `remove`, `clear`, `len`, `is_empty`, `keys`.
+
+### `read_snapshot` (read-only)
+
+`read_snapshot(path)` returns a `Snapshot`: sorted `entries` (`key`, `value`, `value_offset`, `updates`), plus `file_bytes`, `valid_bytes`, `frames`, `records`, and `tail_truncated`. A torn or corrupt tail is reported rather than repaired; the file is never modified.
 
 ## Configuration
 

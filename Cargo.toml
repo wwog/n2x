@@ -3,6 +3,7 @@ members = [
     "crates/n2x",
     "crates/n2x-core",
     "crates/n2x-kv",
+    "crates/n2x-kv-cli",
     "crates/n2x-runtime",
     "tests/migration-lab",
 ]
@@ -28,3 +29,5 @@ log = "^0.4.35"
 serde = "^1.0.229"
 serde_json = "^1.0.154"
 sha2 = "0.10.9"
+clap = { version = "^4.5", features = ["derive"] }
+unicode-width = "^0.2"

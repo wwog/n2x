@@ -223,7 +223,14 @@ impl Engine {
             .and_then(|intent| intent.last_failure.as_ref())
             .is_some_and(|failure| failure.apply_state == ApplyState::NotApplied)
         {
-            let failure = self.state().pending.as_ref().unwrap().last_failure.as_ref().unwrap();
+            let failure = self
+                .state()
+                .pending
+                .as_ref()
+                .unwrap()
+                .last_failure
+                .as_ref()
+                .unwrap();
             if failure.error.retry_hint == RetryHint::Never {
                 return self.fail(failure.error.clone(), false);
             }
@@ -1024,21 +1031,46 @@ impl PipelineEngine for Engine {
                     return Ok(self.emit(CommandKind::WakeAt(at)));
                 }
                 let (_, step) = self.step()?;
-                let policy = step.definition.policy.retry.as_ref().unwrap_or(&self.plan().policy.retry);
+                let policy = step
+                    .definition
+                    .policy
+                    .retry
+                    .as_ref()
+                    .unwrap_or(&self.plan().policy.retry);
                 let intent = self.state().pending.as_ref().unwrap();
                 let elapsed = self.time().0.saturating_sub(intent.created_at.0).max(0) as u128;
                 if elapsed >= policy.budget.as_millis() {
-                    return self.fail(N2xError::new(ErrorCode::RETRY_EXHAUSTED, ErrorKind::Unavailable,
-                        ErrorOrigin::Engine, "retry timer exceeded time budget"), true);
+                    return self.fail(
+                        N2xError::new(
+                            ErrorCode::RETRY_EXHAUSTED,
+                            ErrorKind::Unavailable,
+                            ErrorOrigin::Engine,
+                            "retry timer exceeded time budget",
+                        ),
+                        true,
+                    );
                 }
-                if let ReplaySafety::Deduplicated { retention: Some(retention) } = self.recovery_cap()?.replay
+                if let ReplaySafety::Deduplicated {
+                    retention: Some(retention),
+                } = self.recovery_cap()?.replay
                     && elapsed >= retention.as_millis()
                 {
-                    return self.fail(N2xError::new("n2x.operation.dedup_expired", ErrorKind::Conflict,
-                        ErrorOrigin::Engine, "deduplication retention expired while waiting"), true);
+                    return self.fail(
+                        N2xError::new(
+                            "n2x.operation.dedup_expired",
+                            ErrorKind::Conflict,
+                            ErrorOrigin::Engine,
+                            "deduplication retention expired while waiting",
+                        ),
+                        true,
+                    );
                 }
                 self.state_mut().run.status = RunStatus::Running;
-                self.state_mut().pending.as_mut().unwrap().attempts += 1;
+                let intent = self.state_mut().pending.as_mut().unwrap();
+                intent.attempts += 1;
+                // A new attempt may commit before its reply arrives. Persist the unknown
+                // outcome before Apply; the previous attempt's NotApplied is no longer valid.
+                intent.last_failure = None;
                 self.persist(vec![], vec![], AfterCommit::Apply)
             }
             ReplyKind::Time(now) => {
@@ -1051,6 +1083,9 @@ impl PipelineEngine for Engine {
     fn control(&mut self, control: Control) -> Result<Transition, N2xError> {
         if self.state.is_none() {
             return Err(invalid("engine not started"));
+        }
+        if self.state().run.status == RunStatus::Completed {
+            return Err(invalid("completed run cannot be controlled"));
         }
         if self.expected.is_some() {
             match control {
@@ -1093,25 +1128,32 @@ impl PipelineEngine for Engine {
                             });
                     }
                     ResolutionDecision::NotApplied => {
-                        self.state_mut().pending.as_mut().unwrap().last_failure = None;
+                        let now = self.time();
+                        let intent = self.state_mut().pending.as_mut().unwrap();
+                        intent.attempts = 0;
+                        intent.created_at = now;
+                        let mut error = N2xError::new(
+                            "n2x.operation.resolved",
+                            ErrorKind::Conflict,
+                            ErrorOrigin::Runtime,
+                            resolution.reason.clone(),
+                        );
+                        error.retry_hint = RetryHint::Transient;
+                        intent.last_failure = Some(OperationFailure {
+                            error,
+                            apply_state: ApplyState::NotApplied,
+                        });
                     }
                 }
                 self.state_mut().run.status = RunStatus::Running;
-                let after = match resolution.decision {
-                    ResolutionDecision::Applied(_) => AfterCommit::Drive,
-                    ResolutionDecision::NotApplied => AfterCommit::Apply,
-                };
                 self.state_mut().run.last_error = None;
                 self.persist(
                     vec![NoticeKind::OperationResolved(resolution)],
                     vec![],
-                    after,
+                    AfterCommit::Drive,
                 )
             }
             Control::Resume => {
-                if matches!(self.state().run.status, RunStatus::Completed) {
-                    return Err(invalid("terminal run cannot resume"));
-                }
                 let now = self.time();
                 if let Some(intent) = self.state_mut().pending.as_mut()
                     && intent

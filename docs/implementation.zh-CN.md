@@ -1,111 +1,143 @@
-# 后续实现清单
+# 实现与接入说明
 
-当前是可编译模型和端口，没有空壳 Runner 或 todo 实现。具体接口以
-[模型契约](model.zh-CN.md) 和 rustdoc 为准。
+模型与标准管线已实现。数据库和文件业务适配器只在测试项目中，库提供协议、调度和
+工作区基础设施。声明字段见 [模型契约](model.zh-CN.md)，行为示例见
+[网页测试项目](../tests/migration-lab/README.md)。
 
-## 1. 模块落点
+## 1. 实际模块
 
-| 落点 | 已有 | 后续工作 |
-| --- | --- | --- |
-| n2x-core::manifest | 声明模型 | 声明校验 |
-| n2x-core::plan | 快照、路径和能力 | 路径搜索、注册解析、计划编译 |
-| n2x-core::protocol | PipelineEngine、命令、结果 | 纯状态机 |
-| n2x-core::workspace | 恢复和事务模型 | 由 Runtime 落盘 |
-| n2x-runtime::ports | 执行端口 trait | 注册表、命令分发、平台实现 |
-| n2x-runtime | feature 与依赖边界 | 工作区、通知、锁、驱动 |
-| n2x-kv | 现有持久存储 | 通过 Runtime 适配 |
-| n2x | 统一导出 | 最后实现 Builder、Migrator、RunHandle |
+| 模块 | 责任 |
+| --- | --- |
+| n2x-core::compiler | 校验声明、选择唯一路径或显式路径、解析能力、生成不可变计划 |
+| n2x-core::codec | 递归排序的规范 JSON 与 SHA-256；Encoded 业务字节不变 |
+| n2x-core::engine | 单命令在途、Task / Transfer / Check、版本提交、错误恢复与控制 |
+| n2x-runtime::Registry | Reader / Writer / Task / Check / Transform 注册与命令执行 |
+| n2x-runtime::Migrator | start / tick / run，所有权、恢复验证、查询与通知管理 |
+| n2x-runtime::StateWorkspace | 版本、计划、恢复、隔离、报告、通知、订阅与提交去重 |
+| n2x-runtime 原生模块 | KvBackend、NativeLock、NativeClock、NativeBlobStore |
+| n2x | 模型与上述入口的统一导出 |
 
-## 2. 计划编译器
+## 2. 应用接入顺序
 
-执行副作用前完成：
+1. 为一组实际资源确定稳定 ScopeId 和 ResourceId。账号数据和工作区不能串用。
+2. 声明版本边，每个操作分为 Task、Transfer 或 Check，同版本多个项目顺序放入 steps。
+3. 向 Registry 注册所需行为，提供资源绑定、ActionRef 修订号和真实恢复能力。
+4. 原生环境用 `Migrator::open_native(directory, manifests, registry)` 组合 KV、锁和时钟。
+   其他平台用 `Migrator::new` 注入 Workspace、Clock、Lock；加载任何状态前必须取得锁。
+5. `start(RunRequest)` 编译或恢复。initial 仅用于尚未存在的 Scope，不覆盖已有版本。
+6. `run().await` 得到报告或标准错误；UI / 宿主事件循环用 `tick().await` 逐条驱动。
 
-- 校验 ID、重复、图、路径和显式 route 连续性；initial 不覆盖已有状态。
-- 检查 ScopeState.active_run，防止新运行忽略旧运行的待确认或部分效果。
-- 验证 Action 修订、资源身份、编码和配置，固定具体调用的能力。
-- 检查源一致性、游标恢复、单位大小、同库读写条件和恢复策略。
-- 检查重试参数、持久级别和去重保留期；确定允许的恢复期限。
-- 决定规范编码及版本，计算 SHA-256，保存 PlanSnapshot。
+完整可编译的装配代码位于 `tests/migration-lab/src/lib.rs` 的 make_migrator。
+异步返回值不强制 Send，不绑定 Tokio；原生 KV 和文件实现包含同步 IO，宿主按需放到
+专用线程。Web 可选择 `default-features=false, features=["engine"]`，实现平台端口。
 
-第一版建议普通升级图无环。from == to 可使用空计划，但仍要验证资源和权威状态。
+## 3. 一条命令的提交边界
 
-## 3. Engine
+```mermaid
+sequenceDiagram
+    participant E as Engine
+    participant R as Runtime
+    participant W as Workspace
+    participant P as Writer / Task
+    E->>R: Commit(Intent + 请求材料)
+    R->>W: 原子 write + flush
+    W-->>E: WorkspaceReceipt
+    E->>P: Apply(稳定 OperationId)
+    P-->>E: Receipt / OperationFailure
+    E->>W: Commit(凭证 + checkpoint + 事件)
+    W-->>E: WorkspaceReceipt
+    E->>R: 下一单位 / 下一步骤
+```
 
-先实现顺序状态机：初始化 -> Task/Transfer/Check -> AdvanceRevision -> 下一边 -> 完成。
-业务失败通过 Transition 保存运行状态；输入协议无效才返回方法 Err。
+外部业务与工作区不假装共享事务。Writer/Task 自己保证幂等、同事务去重或权威查询。
+失败明确区分 NotApplied、Applied、Unknown；Unknown 不能简单当作失败后重放。
+恢复会比对保存计划、资源身份、行为修订与能力，验证待确认请求和凭证，再递增 epoch。
+旧 epoch 回复被拒绝。工作区提交确认失败时保留同一 CommitId，不执行新业务操作。
 
-每次最多一条命令在途；Pause/Cancel 在安全边界实施。实现有限退避、预算、Clock/WakeAt
-输入和持久 epoch。本进程耗时使用单调计时，Unix 时间用于日志和跨重开调度，防止时间
-倒退制造无限重试。
+Transfer 冻结转换结果和有序写入单位，记录 Receipt 连续前缀。全批单位、隔离记录均确认后
+才一起推进 cursor、转换状态与统计。重开不会重新生成已经冻结的输出。
+读、转换、检查出错会持久失败；副作用支持有界自动重试、指数退避、期限及去重保留期。
+每次重新 Apply 前先持久清除上一次的结果判定，恢复时不会将旧 NotApplied 当成新尝试的
+结果。人工确认 NotApplied 则先持久保存结论和审计，再经过相同的重试提交边界。
+NativeClock 由外部提供时间和唤醒，Engine 本身不睡眠。
 
-## 4. Workspace / Native
-
-先固定状态编码与保留键空间，再适配 n2x-kv。一个 Workspace 一个写者，加载和修改前
-取得所有权，直到在途操作结束。使用独立锁文件，避免 KV compact 替换 inode 破坏锁。
+## 4. 工作区与版本权威
 
 ```text
 state_dir/
-  workspace.lock
-  state.kv
-  spool/           恢复必需，不能随意删除
-
-cache_dir/         可以清空
+  workspace.lock    独立锁文件，不随 KV compact 替换
+  state.kv          n2x-kv 原子状态与提交收据
+spool_dir/          可选 NativeBlobStore，显式配置并由适配器使用
+cache_dir/          应用自己的可清除缓存，不保存恢复必需材料
 ```
 
-适配时必须处理：
+内置工作区的物理键使用 `n2x/v1/<namespace>/<JSON编码身份>`，避免字符串拼接歧义。
+一个 WorkspaceCommit 映射成一次 KV write；Durable 要求 flush 成功。即使前次 write 已成功
+而 flush 或回复不明，重放也再次执行持久屏障。CommitId 相同但摘要不同会拒绝。
 
-- 一个 WorkspaceCommit 对应一个原子 write，去重凭证也在其中。
-- Durable 请求调用 flush，成功后才能返回相应 WorkspaceReceipt。
-- 单帧放不下时提前拒绝或外置内容，不能拆开语义事务。
-- flush 失败后停止新副作用，沿用原 CommitId 重试或核对现场。
-- 新文件、spool、重命名及必要目录项的持久化。
-- 容量预算；不能为了腾空间删除 pending 或尚有引用的 Blob。
-- 原子完成整批时保存隔离记录，再移除 PreparedBatch 暂存副本。
-- 分别维护恢复日志、事件历史、隔离、spool、cache 的保留规则。
-- 同步 KV IO 的平台驱动或工作线程，不把阻塞行为引入核心。
+ScopeState 是权威版本。整条边完成时原子保存版本、RevisionCommit、checkpoint 和事件。
+SQL user_version 可以作为业务 Task 更新和 Check 校验；它可能在边提交前短暂领先。
+失败、暂停、取消保留 active_run，下一次 start 恢复原运行或报告目标冲突。
+取消只停止后续工作，显式 Resume 可以继续，不代表自动回滚。
 
-当前 KV 没有跨进程锁或分布式 CAS，不能用 get + set 模拟抢锁。
+NativeBlobStore 支持流式追加、持久冻结、范围读取与摘要验证。引用存在时由应用负责保留；
+不自动回收恢复/隔离材料。范围读取会扫描摘要，内存有界。默认 KV 为 64 MiB，单值和事务
+仍受 n2x-kv 限制；超限返回错误，不拆分原子事务或删除现场。可自行组合带 StoreOptions
+的后端。提交收据和隔离记录暂不自动清理。
 
-## 5. 端口 / Registry
+## 5. 通知与控制
 
-注册 key 为 ActionRef 或 PortId，验证实际资源与计划匹配。Task/Check 的资源由组合层
-注入，不能私自连接声明之外的资源。
+`snapshot` 返回最近已确认视图，`drain_notices` 取得本执行器确认后的事件。
+`events_after(run, after, limit)` 从持久事件按页补读。默认每个运行保留 1000 条，可通过
+`StateWorkspace::with_event_limit` 调整。过期位置返回带快照的 EventPage::Gap。
 
-推荐实现顺序：
+可靠订阅使用：
 
-1. 假 Reader/Writer/Task，精确模拟未知结果与中断。
-2. 文件夹迁移：Blob 分块、单文件提交、清单校验。
-3. SQLite：DDL、同事务业务写入与去重表、回填、校验。
-4. WCDB：旧接口 Reader，复用 SQLite 输出与运行管理。
-5. Web：IndexedDB Workspace、单线程 Future、跨上下文所有权。
+```text
+subscribe(CommitId, NoticeAck { subscriber, run, through_sequence })
+    → events_after(run, through_sequence, limit)
+    → 消费者处理并按 run + sequence 去重
+    → acknowledge(新的 CommitId, 累计 NoticeAck)
+    → 重复补读与确认
+unsubscribe(CommitId, run, subscriber) 释放历史保护
+```
 
-无法原子提交多条输出时，Writer 可以只接受单条单位，或提供可恢复的部分结果收敛。
-“支持事务”不能替代 OperationId 去重。发布、切换业务入口、清理旧数据都显式建模。
+订阅必须在所需历史过期前注册。未确认事件不能被裁剪；满时提交返回
+`n2x.notice.backpressure`。消费者 ACK 或显式退订后，可 tick 重试原提交。
+通知提交不确定时，调用方重用相同 CommitId 和内容。框架提供持久拉取机制，外部推送
+通道由应用实现。通知回调不能充当业务步骤；必需行为声明为 Step。
 
-## 6. 通知 / SDK
+控制包括 Pause、Resume、Cancel、Resolve。Pause/Cancel 在安全边界生效；未知结果进入
+NeedsAttention。Resolve 必须提供明确判断与审计原因；其事件先持久化再继续。
+显式 Resume 可为权威 NotApplied 重置一次人工重试预算；普通重开不重置自动重试上限。
+Completed 运行拒绝继续、暂停或取消，后续迁移必须创建新运行。
 
-先实现 snapshot/watch、关键事件补读，再按需实现可靠 outbox。UI 可以合并进度，
-过期历史返回 Gap。可靠投递需要容量预算、背压、ACK 和重发去重。
+## 6. 错误与版本路径
 
-Observer 不控制执行结果，必需行为用 Step，控制用 Control。SDK 最后组合初始化、
-启动/恢复、默认策略、句柄和查询，让业务无需自建版本表、重试队列和 checkpoint。
+N2xError 可序列化，包含 code、kind、origin、retry_hint 与定位上下文。
+业务操作另带 ApplyState，不通过 message 猜测提交状态。Failed / NeedsAttention 都有持久
+RunReport；`Migrator::run` 返回 Err，报告可单独查询。计划错误在副作用前直接返回。
 
-## 7. 故障验收
-
-| 中断窗口 / 条件 | 必须验证 |
+| 情况 | 行为 |
 | --- | --- |
-| Intent 持久化前 | 未发送对应业务操作 |
-| Intent 后、输出回复前 | 相同 ID 安全重放或权威对账 |
-| 输出提交后、checkpoint 前 | 不重复产生业务效果 |
-| 部分输出单位完成 | 不重新生成输出，不提前推进输入游标 |
-| 全过滤或全隔离批次 | 无输出也能正确持久推进 |
-| write 成功、flush 失败 | 不依赖未确认状态继续 |
-| Workspace Reply 丢失 | 同 CommitId 不重复计数和事件 |
-| 版本推进前后 | current 与完整边提交一致 |
-| 通知发送或 ACK 前 | 可补读、去重重发 |
-| 快照过期或资源换绑 | 明确停止，不沿用无效游标 |
-| KV 满、Blob 丢失或摘要不符 | 不删除现场，不误报成功 |
-| 旧 epoch Reply | 不推进当前运行 |
-| 取消时仍有未知结果 | 先进入待处理，不误报安全取消 |
+| v0 请求 v3 | 解析并顺序执行 v0→v1→v2→v3 |
+| 当前已经 v3，再请求 v3 | 空路径完成，不重做业务步骤 |
+| v3 请求 v1，无反向边 | n2x.version.rollback_unsupported |
+| 两条路径可达目标 | n2x.plan.route_ambiguous，需 Route::Explicit |
+| 业务事务明确回滚 | 保留旧权威版本，记录业务错误和 NotApplied |
+| 输出提交后进程中断 | 同 ID 安全重放或权威查询，避免重复效果 |
+| 未知结果且不能自动核对 | NeedsAttention，等待显式 Resolve |
+| 源视图变化、资源换绑或计划变化 | 停止并报告，不静默套用旧游标 |
 
-当前模型测试验证声明与序列化保真，不声称已验证上述运行时行为。
+真正跳过中间版本需要单独声明从当前版本到目标版本的 Manifest，并明确选择路径。
+快捷按钮只表示目标选择，不会默默遗漏必要的目录搬迁或建索引步骤。
+
+## 7. 验证覆盖与范围
+
+- 网页测试：逐版执行、直接 v3、同版本多个项目、索引不改行、反向请求、事务回滚后继续。
+- 故障恢复：逐命令边界重开、外部提交后 checkpoint 前重开、暂停/取消后继续、源变化停止。
+- 核心：路径歧义、旧回复拒绝、未确认版本不可见、未知结果人工核对、有限重试、定时器错误。
+- 工作区：提交去重、write 成功/flush 不明、事件 Gap、可靠订阅背压、锁竞争、Blob 完整性。
+
+测试不等同于跨所有文件系统的断电验证；端口恢复保证仍依赖实际适配器契约。
+库不实现通用分布式事务、自动逆迁移、后台网络投递或业务数据库端口。

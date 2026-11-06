@@ -112,6 +112,30 @@ fn failure(state: ApplyState, hint: RetryHint) -> ReplyKind {
         apply_state: state,
     }))
 }
+fn mutations(transition: &Transition) -> &[WorkspaceMutation] {
+    let CommandKind::Commit(commit) = &transition.command.as_ref().unwrap().kind else {
+        panic!("expected commit")
+    };
+    &commit.mutations
+}
+fn saved_plan(transition: &Transition) -> PlanSnapshot {
+    mutations(transition)
+        .iter()
+        .find_map(|mutation| match mutation {
+            WorkspaceMutation::SavePlan { plan, .. } => Some(*plan.clone()),
+            _ => None,
+        })
+        .unwrap()
+}
+fn saved_state(transition: &Transition) -> RecoverySnapshot {
+    mutations(transition)
+        .iter()
+        .find_map(|mutation| match mutation {
+            WorkspaceMutation::SaveRecovery(state) => Some(*state.clone()),
+            _ => None,
+        })
+        .unwrap()
+}
 
 #[test]
 fn unsafe_unknown_stops_and_manual_receipt_is_audited_before_advancing() {
@@ -160,6 +184,124 @@ fn unsafe_unknown_stops_and_manual_receipt_is_audited_before_advancing() {
         transition = commit(&mut engine, transition);
     }
     assert_eq!(engine.snapshot().unwrap().status, RunStatus::Completed);
+    let completed = engine.snapshot().unwrap().clone();
+    for control in [Control::Pause, Control::Cancel, Control::Resume] {
+        assert!(engine.control(control).is_err());
+        assert_eq!(engine.snapshot().unwrap(), &completed);
+    }
+}
+
+#[test]
+fn retry_crash_cannot_reuse_previous_not_applied_outcome() {
+    let (mut engine, transition) = engine(ReplaySafety::Unsafe);
+    let plan = saved_plan(&transition);
+    let command = to_apply(&mut engine, transition);
+    let transition = accept(
+        &mut engine,
+        command,
+        failure(ApplyState::NotApplied, RetryHint::Transient),
+    );
+    let transition = commit(&mut engine, transition);
+    let wake = transition.command.unwrap();
+    let CommandKind::WakeAt(at) = wake.kind else {
+        panic!()
+    };
+    let transition = accept(&mut engine, wake, ReplyKind::Woken(Ok(at)));
+    let state = saved_state(&transition);
+    assert_eq!(state.pending.as_ref().unwrap().attempts, 2);
+    assert!(state.pending.as_ref().unwrap().last_failure.is_none());
+    let _second_apply = to_apply(&mut engine, transition);
+
+    // The second effect may already have committed when the process disappears.
+    // An unsafe port cannot replay it based on the first attempt's NotApplied.
+    let mut recovered = Engine::default();
+    let mut transition = recovered
+        .start(
+            EngineStart::Recover {
+                snapshot: Box::new(state),
+                plan: Box::new(plan),
+                now: at,
+            },
+            2,
+        )
+        .unwrap();
+    while transition.command.is_some() {
+        transition = commit(&mut recovered, transition);
+    }
+    assert_eq!(
+        recovered.snapshot().unwrap().status,
+        RunStatus::NeedsAttention
+    );
+}
+
+#[test]
+fn manual_not_applied_is_durable_until_the_next_attempt() {
+    let (mut engine, transition) = engine(ReplaySafety::Unsafe);
+    let plan = saved_plan(&transition);
+    let command = to_apply(&mut engine, transition);
+    let CommandKind::Apply(request) = &command.kind else {
+        panic!()
+    };
+    let operation = request.context.id.clone();
+    let transition = accept(
+        &mut engine,
+        command,
+        failure(ApplyState::Unknown, RetryHint::Never),
+    );
+    let transition = commit(&mut engine, transition);
+    commit(&mut engine, transition);
+    let transition = engine
+        .control(Control::Resolve(Resolution {
+            operation: operation.clone(),
+            decision: ResolutionDecision::NotApplied,
+            reason: "operator verified no external commit or in-flight work".into(),
+        }))
+        .unwrap();
+    let state = saved_state(&transition);
+    assert_eq!(
+        state
+            .pending
+            .as_ref()
+            .unwrap()
+            .last_failure
+            .as_ref()
+            .unwrap()
+            .apply_state,
+        ApplyState::NotApplied
+    );
+
+    // Simulate a restart immediately after the resolution audit is committed.
+    let mut recovered = Engine::default();
+    let transition = recovered
+        .start(
+            EngineStart::Recover {
+                snapshot: Box::new(state),
+                plan: Box::new(plan),
+                now: Timestamp(0),
+            },
+            2,
+        )
+        .unwrap();
+    let transition = commit(&mut recovered, transition);
+    let transition = commit(&mut recovered, transition);
+    let wake = transition.command.unwrap();
+    let CommandKind::WakeAt(at) = wake.kind else {
+        panic!()
+    };
+    let transition = accept(&mut recovered, wake, ReplyKind::Woken(Ok(at)));
+    assert!(
+        saved_state(&transition)
+            .pending
+            .unwrap()
+            .last_failure
+            .is_none()
+    );
+    let command = to_apply(&mut recovered, transition);
+    let CommandKind::Apply(request) = command.kind else {
+        panic!()
+    };
+    assert_eq!(request.context.id, operation);
+    assert_eq!(command.id.attempt, 1);
 }
 
 #[test]

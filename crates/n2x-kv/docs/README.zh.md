@@ -157,6 +157,32 @@ assert!(state.type_of("profile").is_some());
 
 `AnyStore` 的结构体不需要 serde、不需要 `Clone`、没有容量上限，代价是只在进程内有效：不能落盘、不进 FFI。值类型必须 `Any + Send + Sync`，带借用的类型（`&'a str`、切片引用）存不进去，需要改成自持有形态。
 
+## 查看文件内容
+
+`n2x_kv::read_snapshot(path)` 以只读方式扫描日志文件，按字典序返回活键。它不会打开 `Store`、不占用进程内路径、不触发压缩，也不会截断撕裂尾部，因此可以直接查看另一个进程正在追加的文件：
+
+```rust
+let snapshot = n2x_kv::read_snapshot("/tmp/demo.kv")?;
+for entry in &snapshot.entries {
+    println!(
+        "{} = {:?}（写入 {} 次）",
+        entry.key,
+        String::from_utf8_lossy(&entry.value),
+        entry.updates
+    );
+}
+```
+
+`n2x-kv` 命令行工具在此基础上提供表格与导出：
+
+```sh
+cargo run -p n2x-kv-cli -- /tmp/demo.kv               # 对齐表格
+cargo run -p n2x-kv-cli -- /tmp/demo.kv --format kv   # key = value
+cargo run -p n2x-kv-cli -- /tmp/demo.kv --format json # 结构化 JSON
+```
+
+参数、转义规则与输出示例见 [n2x-kv-cli](../../n2x-kv-cli/README.md)。
+
 ## API 概览
 
 ### `Store`（文件）
@@ -183,6 +209,10 @@ assert!(state.type_of("profile").is_some());
 ### `AnyStore`（内存动态类型）
 
 `get<T>`、`set<T>`、`get_str` / `set_str`、`get_u32`、`get_u64`、`get_i64`、`get_f64`、`get_bool`、`contains`、`type_of`、`remove`、`clear`、`len`、`is_empty`、`keys`。
+
+### `read_snapshot`（只读）
+
+`read_snapshot(path)` 返回 `Snapshot`：按字典序排列的 `entries`（`key`、`value`、`value_offset`、`updates`），以及 `file_bytes`、`valid_bytes`、`frames`、`records`、`tail_truncated`。撕裂或损坏的尾部只上报、不修复；文件不会被修改。
 
 ## 配置
 

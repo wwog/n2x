@@ -18,6 +18,13 @@
 //! [`AnyStore`] 是另一条路：结构体原样存入、原样取出，不需要 serde、不需要
 //! `Clone`，也没有容量上限。它只在进程内有效，不能落盘、不进 FFI。
 //!
+//! # 只读查看
+//!
+//! [`read_snapshot`] 以只读方式扫描日志文件，不打开 [`Store`]、不加进程内
+//! 路径占用、不触发压缩，也不会截断撕裂尾部。返回的 [`Snapshot`] 包含按
+//! 字典序排列的活键、每个键的写入次数、有效帧数与被丢弃的尾部大小。这是
+//! 工作区里 `n2x-kv` 命令行查看器的底层实现，也可用于崩溃排查和离线导出。
+//!
 //! # 性能模型
 //!
 //! 点读是一次哈希查找加一次值拷贝；点写是追加一帧日志、更新哈希索引，
@@ -29,6 +36,7 @@ mod backend;
 mod error;
 mod format;
 mod index;
+mod inspect;
 mod memory;
 mod store;
 mod typed;
@@ -36,6 +44,7 @@ mod typed;
 pub use any::AnyStore;
 pub use backend::BackendKind;
 pub use error::KVError;
+pub use inspect::{Snapshot, SnapshotEntry, read_snapshot};
 pub use memory::{MemoryOptions, MemoryStore};
 pub use store::{BackendPreference, Mutation, Stats, Store, StoreOptions};
 pub use typed::TypedStore;

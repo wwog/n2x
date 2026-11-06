@@ -290,7 +290,9 @@ impl Migrator {
     }
 
     async fn ensure_guard(&mut self) -> Result<(), N2xError> {
-        if self.guard.is_none() { self.guard = Some(self.lock.acquire().await?); }
+        if self.guard.is_none() {
+            self.guard = Some(self.lock.acquire().await?);
+        }
         Ok(())
     }
 

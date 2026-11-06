@@ -1,0 +1,21 @@
+[package]
+name = "n2x-kv-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Inspect and export the contents of n2x-kv store files"
+keywords = ["key-value", "cli", "inspect", "export"]
+readme = "README.md"
+
+[[bin]]
+name = "n2x-kv"
+path = "src/main.rs"
+
+[dependencies]
+n2x-kv.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+unicode-width.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
