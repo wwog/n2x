@@ -275,6 +275,7 @@ impl Lab {
     /// 状态包含真实 SQLite 和文件内容，以及框架的持久权威版本。
     pub async fn state(&mut self) -> Result<Value, N2xError> {
         let scope = self.migrator.scope("demo".into()).await?;
+        let executor_loaded = self.migrator.snapshot().is_some();
         let snapshot = if let Some(snapshot) = self.migrator.snapshot() {
             Some(snapshot.clone())
         } else if let Some(active) = scope.as_ref().and_then(|scope| scope.active_run.clone()) {
@@ -335,7 +336,7 @@ impl Lab {
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .map_err(io)?;
         Ok(
-            json!({"data_dir":self.root,"version":scope.as_ref().map(|scope|scope.current.0.clone()).unwrap_or("v0".into()),"scope":scope,"run":snapshot,"next_command":self.migrator.pending_command(),"events":events,"schema":schema,"tables":tables,"sql_version":sql_version,"files":{"a_exists":self.root.join("a").exists(),"a":files(&self.root.join("a"))?,"b":files(&self.root.join("b"))?},"errors":self.errors,"fault_armed":self.fault.get()}),
+            json!({"data_dir":self.root,"version":scope.as_ref().map(|scope|scope.current.0.clone()).unwrap_or("v0".into()),"scope":scope,"run":snapshot,"executor_loaded":executor_loaded,"next_command":self.migrator.pending_command(),"events":events,"schema":schema,"tables":tables,"sql_version":sql_version,"files":{"a_exists":self.root.join("a").exists(),"a":files(&self.root.join("a"))?,"b":files(&self.root.join("b"))?},"errors":self.errors,"fault_armed":self.fault.get()}),
         )
     }
     fn record_error(&mut self, error: N2xError) -> Result<(), N2xError> {

@@ -1,21 +1,178 @@
 <!doctype html>
-<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>n2x · Migration lab</title>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>n2x · 迁移演示</title>
 <style>
-:root{font-family:Inter,ui-sans-serif,system-ui,sans-serif;color:#182a29;background:#f1f4f0}*{box-sizing:border-box}body{margin:0;padding:32px;max-width:1500px;margin:auto}header{display:flex;align-items:end;justify-content:space-between;margin-bottom:24px}h1{font-size:34px;margin:5px 0}h2{font-size:16px;margin:0 0 16px}.eyebrow{letter-spacing:2px;font-size:11px;color:#527369;font-weight:700}.sub{color:#698078;font-size:13px}button,select{font:inherit;font-size:13px;padding:10px 14px;border:1px solid #c8d5ca;background:white;border-radius:7px;color:#183c31;cursor:pointer}button:hover{background:#e4f2e8}button:disabled{opacity:.45;cursor:wait}.primary{background:#194e3c;color:white;border-color:#194e3c}.danger{color:#9c4b30}.toolbar{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}.grid{display:grid;grid-template-columns:1.3fr 1fr;gap:18px}.card{background:#fff;border:1px solid #dbe3da;border-radius:12px;padding:22px;min-width:0}.wide{grid-column:1/-1}.versions{display:flex;gap:8px;margin:16px 0}.version{flex:1;border-top:4px solid #dce5dc;padding:12px;background:#f6f8f3;border-radius:6px}.version.active{border-color:#308764;background:#e6f3e8}.version strong{display:block;margin-bottom:6px}.badge{background:#e9f1e9;padding:7px 12px;border-radius:20px;font:12px ui-monospace,monospace}pre{font:12px/1.65 ui-monospace,SFMono-Regular,monospace;white-space:pre-wrap;word-break:break-word;margin:0;max-height:360px;overflow:auto;background:#f6f8f4;padding:14px;border-radius:6px}table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:14px}td,th{text-align:left;padding:9px;border-bottom:1px solid #e3e9df}th{color:#647c6e;font-size:11px;text-transform:uppercase}.events{height:300px;overflow:auto;font-size:12px}.event{display:grid;grid-template-columns:45px 1fr;gap:10px;padding:9px;border-bottom:1px solid #edf0e8}.error{color:#9c3e28;background:#fff0e9;padding:14px;border-radius:8px;white-space:pre-wrap;font-size:12px;margin-bottom:18px}.hidden{display:none}.mono{font-family:ui-monospace,monospace}.path{margin-top:12px;font:11px ui-monospace,monospace;color:#7c8d80;word-break:break-all}@media(max-width:850px){body{padding:16px}.grid{grid-template-columns:1fr}header{align-items:start;gap:15px}.versions{flex-wrap:wrap}.version{min-width:100px}}
+:root{font-family:Inter,ui-sans-serif,system-ui,sans-serif;color:#182a29;background:#f1f4f0}*{box-sizing:border-box}body{margin:0;padding:32px;max-width:1500px;margin:auto}header{display:flex;align-items:end;justify-content:space-between;margin-bottom:24px}h1{font-size:34px;margin:5px 0}h2{font-size:16px;margin:0 0 16px}h3{font-size:14px;margin:0 0 8px}.eyebrow{letter-spacing:2px;font-size:11px;color:#527369;font-weight:700}.sub{color:#526b60;font-size:13px;line-height:1.8}button,select{font:inherit;font-size:13px;padding:10px 14px;border:1px solid #c8d5ca;background:white;border-radius:7px;color:#183c31;cursor:pointer}button:hover{background:#e4f2e8}button:disabled,select:disabled{opacity:.45;cursor:default}.primary{background:#194e3c;color:white;border-color:#194e3c}.primary:hover{background:#24634d}.danger{color:#9c4b30}.toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:14px 0}.grid{display:grid;grid-template-columns:1.3fr 1fr;gap:18px}.card{background:#fff;border:1px solid #dbe3da;border-radius:12px;padding:22px;min-width:0}.wide{grid-column:1/-1}.versions{display:flex;gap:8px;margin:16px 0}.version{flex:1;border-top:4px solid #dce5dc;padding:12px;background:#f6f8f3;border-radius:6px}.version.active{border-color:#308764;background:#e6f3e8}.version strong{display:block;margin-bottom:6px}.badge{background:#e9f1e9;padding:7px 12px;border-radius:20px;font-size:12px}pre{font:12px/1.65 ui-monospace,SFMono-Regular,monospace;white-space:pre-wrap;word-break:break-word;margin:0;max-height:360px;overflow:auto;background:#f6f8f4;padding:14px;border-radius:6px}table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:14px}td,th{text-align:left;padding:9px;border-bottom:1px solid #e3e9df}th{color:#647c6e;font-size:11px;text-transform:uppercase}.events{max-height:300px;overflow:auto;font-size:13px}.event{display:grid;grid-template-columns:45px 1fr;gap:10px;padding:9px;border-bottom:1px solid #edf0e8}.error{color:#9c3e28;background:#fff0e9;padding:14px;border-radius:8px;white-space:pre-wrap;font-size:13px;margin-bottom:18px;line-height:1.7}.hidden{display:none}.path{margin-top:12px;font:11px ui-monospace,monospace;color:#7c8d80;word-break:break-all}details{border-top:1px solid #e3e9df;padding-top:16px;margin-top:18px}summary{cursor:pointer;font-size:14px;font-weight:600}details[open]>summary{margin-bottom:14px}.action-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}.action-box{background:#f6f8f4;border-radius:8px;padding:16px}.action-box button{margin-bottom:10px}.hint{margin-top:14px;padding:12px 14px;background:#eaf3ec;border-radius:7px;font-size:13px;line-height:1.8}.current-item{font-size:21px;margin:12px 0}.reset-row{margin-top:18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}@media(max-width:850px){body{padding:16px}.grid,.action-grid{grid-template-columns:1fr}header{align-items:start;gap:15px}.versions{flex-wrap:wrap}.version{min-width:100px}}
 </style>
-<header><div><div class="eyebrow">N2X / INTEGRATION WORKSPACE</div><h1>Migration lab</h1><div class="sub">一套管线，观察数据、结构与目录如何逐版演进。</div></div><span class="badge" id="status">加载中</span></header>
-<div id="error" class="error hidden"></div>
-<section class="card"><h2>版本路径 <span id="revision" class="badge">v0</span></h2>
-<div class="versions"><div class="version" data-v="0"><strong>v0 · 初始资源</strong><span class="sub">users.json + /a</span></div><div class="version" data-v="1"><strong>v1 · 导入与搬迁</strong><span class="sub">JSON → SQL · /a → /b</span></div><div class="version" data-v="2"><strong>v2 · 模型变更</strong><span class="sub">first_name + last_name → name</span></div><div class="version" data-v="3"><strong>v3 · 添加索引</strong><span class="sub">idx_users_name · 数据保持不变</span></div></div>
-<div class="toolbar"><select id="target"><option value="v1">目标 v1</option><option value="v2">目标 v2</option><option value="v3" selected>目标 v3</option></select><button class="primary" onclick="act('start',target())">创建 / 恢复计划</button><button onclick="act('step')">执行下一个步骤</button><button onclick="act('tick')">执行一条命令</button><button onclick="act('resume')">继续失败运行</button></div>
-<div class="toolbar"><button onclick="act('run',{target:'v1'})">快捷到 v1</button><button onclick="act('run',{target:'v2'})">快捷到 v2</button><button class="primary" onclick="act('run',{target:'v3'})">快捷到 v3 · 自动补齐路径</button><button onclick="act('reopen')">重开执行器 / 保留 KV</button><button class="danger" onclick="act('fault')">注入下一次 v2 事务回滚</button><button class="danger" onclick="resetLab()">重置测试资源</button></div>
-<div class="sub">快捷到 v3 会经过 v1 → v2 → v3。完成后再请求 v1 可观察回滚错误。事务回滚注入会保留 v1，点击继续可重试。</div><div class="path" id="path"></div></section>
-<div class="grid" style="margin-top:18px"><section class="card"><h2>SQL 数据 <span id="sql-version" class="badge"></span></h2><div id="tables"></div><h2>实际表结构 / 索引</h2><pre id="schema"></pre></section><section class="card"><h2>运行与下一条命令</h2><pre id="run"></pre><div class="sub" style="margin-top:12px">权威版本仅在整条版本边完成后推进。单步中看到的临时表属于尚未完成的运行。</div></section><section class="card"><h2>目录资源</h2><pre id="files"></pre></section><section class="card"><h2>已持久确认的通知</h2><div id="events" class="events"></div></section><section class="card wide"><h2>标准错误记录</h2><pre id="errors"></pre></section></div>
+<header>
+  <div><div class="eyebrow">N2X / MIGRATION LAB</div><h1>迁移演示</h1><div class="sub">观察数据、表结构和目录如何从 v0 迁移到 v3。</div></div>
+  <span class="badge" id="status">加载中</span>
+</header>
+<div id="error" class="error hidden" role="alert"></div>
+<section class="card">
+  <h2>当前已完成的版本 <span id="revision" class="badge">v0</span></h2>
+  <div class="versions">
+    <div class="version" data-v="0"><strong>v0 · 初始资源</strong><span class="sub">users.json + a 目录</span></div>
+    <div class="version" data-v="1"><strong>v1 · 导入与搬迁</strong><span class="sub">JSON → SQL · a → b</span></div>
+    <div class="version" data-v="2"><strong>v2 · 合并姓名</strong><span class="sub">first_name + last_name → name</span></div>
+    <div class="version" data-v="3"><strong>v3 · 添加索引</strong><span class="sub">新增姓名索引，行数据不变</span></div>
+  </div>
+  <h3>自动完成迁移</h3>
+  <div class="sub">选择目标，一次执行完所需操作。迁移到 v3 会依次完成 v1、v2、v3；发生错误时停止。</div>
+  <div class="toolbar">
+    <button data-target="v1" onclick="act('run',{target:'v1'})">自动迁移到 v1</button>
+    <button data-target="v2" onclick="act('run',{target:'v2'})">自动迁移到 v2</button>
+    <button data-target="v3" class="primary" onclick="act('run',{target:'v3'})">自动迁移到 v3</button>
+  </div>
+  <details open>
+    <summary>逐项观察迁移过程</summary>
+    <div class="sub">先选择目标并准备，再每次完成一个业务项，例如建表、导入全部 JSON、搬迁目录。一个版本包含多个业务项，全部成功后才更新版本。</div>
+    <div class="toolbar">
+      <label for="target">迁移目标</label>
+      <select id="target"><option value="v1">v1</option><option value="v2">v2</option><option value="v3" selected>v3</option></select>
+      <button id="prepare" onclick="act('start',target())">准备逐项迁移</button>
+      <button id="step" onclick="act('step')">完成下一项</button>
+    </div>
+    <div class="sub">“准备”会加载迁移路径和已有进度，不立即执行数据操作。“完成下一项”也可能完成一次版本确认。</div>
+  </details>
+  <div id="hint" class="hint" role="status"></div>
+  <details>
+    <summary>测试失败与重启恢复</summary>
+    <div class="action-grid">
+      <div class="action-box">
+        <button id="fault" class="danger" onclick="act('fault')">让 v2 的下一次写入失败</button>
+        <div class="sub">安排一次测试故障。下次写入 v2 的姓名合并结果时，撤销该批 SQL 写入并报错，迁移版本保持 v1。点击本按钮不会立刻执行迁移。</div>
+        <div id="fault-status" class="sub"></div>
+      </div>
+      <div class="action-box">
+        <button id="resume" onclick="act('resume')">准备从失败处重试</button>
+        <div class="sub">故障排除后，让停止的任务可以继续。此按钮不会立即执行数据操作；然后点击“完成下一项”，或“自动迁移到”原目标。已经确认完成的项目会保留。</div>
+      </div>
+      <div class="action-box">
+        <button onclick="act('reopen')">模拟重启，保留进度</button>
+        <div class="sub">重新创建迁移执行器，保留数据库、文件和已保存的进度。随后选择原来的目标，点击“准备逐项迁移”，再继续执行。用于检查中途退出后能否恢复。</div>
+      </div>
+    </div>
+    <div class="reset-row"><button class="danger" onclick="resetLab()">清空演示数据，回到 v0</button><span class="sub">重新生成初始 JSON 和 a 目录；清除本测试目录中的数据库、迁移进度与日志。</span></div>
+  </details>
+  <div class="path" id="path"></div>
+</section>
+<div class="grid" style="margin-top:18px">
+  <section class="card"><h2>数据库中的实际数据 <span id="sql-version" class="badge"></span></h2><div id="tables"></div><h2>实际表结构 / 索引</h2><pre id="schema"></pre></section>
+  <section class="card"><h2>当前迁移进度</h2><div id="current-item" class="current-item"></div><div id="progress" class="sub"></div><div class="sub" style="margin-top:12px">迁移中可能看到临时表或部分数据。顶部版本只在该版本的所有业务项完成后更新。</div></section>
+  <section class="card"><h2>实际目录与文件</h2><pre id="files"></pre></section>
+  <section class="card"><h2>已保存的执行记录</h2><div id="events" class="events"></div></section>
+  <section class="card wide"><h2>错误记录</h2><pre id="errors"></pre></section>
+  <section class="card wide"><details style="border:0;padding:0;margin:0"><summary>内部调度详情（开发调试）</summary><div class="sub">一个业务项会拆成多次内部动作，例如保存执行意图、读取一批、转换、写入一批、保存进度。下面的按钮只执行其中一次，因此不一定看到数据变化。普通演示使用上方“完成下一项”。</div><div class="toolbar"><button id="tick" onclick="act('tick')">推进一次内部动作</button></div><h3>原始运行状态与下一动作</h3><pre id="run"></pre></details></section>
+</div>
 <script>
-const el=id=>document.getElementById(id),pretty=v=>JSON.stringify(v,null,2),target=()=>({target:el('target').value});let busy=false;
-function render(s){if(!s)return;el('revision').textContent=s.version;el('path').textContent=s.data_dir;el('sql-version').textContent='user_version = '+s.sql_version;el('status').textContent=s.run?(typeof s.run.status==='string'?s.run.status:Object.keys(s.run.status)[0]):'Ready';document.querySelectorAll('[data-v]').forEach(n=>n.classList.toggle('active',Number(n.dataset.v)<=Number(s.version.slice(1))));el('schema').textContent=s.schema.filter(x=>x.name!=='_n2x_receipts').map(x=>x.sql).join('\n\n')||'尚未创建业务表';el('run').textContent=pretty({run:s.run?{id:s.run.run,status:s.run.status,current:s.run.current,target:s.run.target,step:s.run.step,confirmed:s.run.progress.confirmed,last_error:s.run.last_error}:null,next_command:s.next_command?{id:s.next_command.id,type:Object.keys(s.next_command.kind)[0]}:null});el('files').textContent=pretty(s.files);el('errors').textContent=pretty(s.errors);const root=el('tables');root.replaceChildren();for(const[name,table]of Object.entries(s.tables)){const heading=document.createElement('h2');heading.textContent=name;root.append(heading);const t=document.createElement('table'),head=t.createTHead().insertRow();for(const col of table.columns){const th=document.createElement('th');th.textContent=col;head.append(th)}for(const row of table.rows){const tr=t.insertRow();for(const col of table.columns){const td=tr.insertCell();td.textContent=row[col]??'NULL'}}root.append(t)}if(!root.children.length)root.textContent='v0：JSON 数据尚未导入';const events=s.events?.Events?.items||[];el('events').replaceChildren();for(const event of events.slice().reverse()){const row=document.createElement('div');row.className='event';const id=document.createElement('span');id.textContent='#'+event.sequence;const body=document.createElement('span');body.textContent=typeof event.notice.kind==='string'?event.notice.kind:pretty(event.notice.kind);row.append(id,body);el('events').append(row)}}
-async function act(action,body={}){if(busy)return;busy=true;document.querySelectorAll('button').forEach(b=>b.disabled=true);try{const response=await fetch('/api/'+action,{method:'POST',headers:{'Content-Type':'application/json'},body:pretty(body)});const result=await response.json();render(result.state);const failure=result.error||result.state?.run?.last_error;el('error').classList.toggle('hidden',!failure);if(failure)el('error').textContent=pretty(failure)}catch(error){el('error').classList.remove('hidden');el('error').textContent=String(error)}finally{busy=false;document.querySelectorAll('button').forEach(b=>b.disabled=false)}}
-function resetLab(){if(confirm('删除测试项目 data 中的生成资源，恢复到 v0？'))act('reset')}
-fetch('/api/state').then(r=>r.json()).then(r=>render(r.state));
-</script></html>
+const el=id=>document.getElementById(id);
+const pretty=value=>JSON.stringify(value,null,2);
+const target=()=>({target:el('target').value});
+let busy=false,lastState=null;
+const statusNames={Ready:'等待开始',Running:'迁移进行中',Recovering:'正在恢复',Waiting:'等待条件满足',Paused:'已暂停',NeedsAttention:'需要人工核对',Completed:'已完成',Failed:'发生错误，已停止',Cancelled:'已取消'};
+const stepNames={'create-users':'创建用户表','json-to-sql':'将 JSON 导入数据库','a-to-b':'将 a 目录复制到 b','remove-a':'核对文件并清理原目录 a','verify-files':'检查迁移后的目录','mark-sql':'记录数据库版本 v1','verify-users':'检查 v1 用户数据','prepare-model':'创建姓名合并用的新表','merge-names':'合并姓名并写入新表','publish-model':'用新表替换旧表','verify-model':'检查姓名合并结果','create-name-index':'创建姓名索引','verify-index':'检查索引'};
+function statusOf(state){const status=state?.run?.status;return typeof status==='string'?status:Object.keys(status||{})[0]}
+function stepName(address){return stepNames[address?.step]||address?.step||'准备下一项'}
+function updateControls(){
+  document.querySelectorAll('button').forEach(button=>button.disabled=busy||!lastState);
+  if(!lastState)return;
+  const pending=!!lastState.next_command,status=statusOf(lastState);
+  const active=lastState.run&&status!=='Completed';
+  const stopped=['Failed','Paused','Cancelled','NeedsAttention'].includes(status);
+  document.querySelectorAll('[data-target]').forEach(button=>button.disabled=busy||(active&&button.dataset.target!==lastState.run.target)||(stopped&&lastState.executor_loaded&&!pending));
+  el('prepare').disabled=busy||pending||(stopped&&lastState.executor_loaded);
+  el('step').disabled=busy||!pending;
+  el('tick').disabled=busy||!pending;
+  el('resume').disabled=busy||pending||!lastState.executor_loaded||!['Failed','Paused','Cancelled'].includes(status);
+  el('fault').disabled=busy||lastState.fault_armed||!['v0','v1'].includes(lastState.version);
+  el('target').disabled=busy||!!active;
+}
+function showError(error){el('error').classList.toggle('hidden',!error);el('error').textContent=error?[error.code,error.message].filter(Boolean).join('\n'):''}
+function noticeText(kind){
+  if(typeof kind==='string')return {RunStarted:'开始迁移',RunRecovering:'从已保存的进度恢复',RunResumed:'已允许继续执行',RunPaused:'已暂停',RunCancelled:'已取消'}[kind]||kind;
+  const [name,value]=Object.entries(kind)[0]||[];
+  switch(name){
+    case 'StepStarted':return '开始：'+stepName(value);
+    case 'StepCompleted':return '完成：'+stepName(value);
+    case 'RevisionAdvanced':return '版本已确认：'+value.revision;
+    case 'ProgressChanged':return '已确认：读取 '+value.confirmed.read+' 条，写入 '+value.confirmed.written+' 条';
+    case 'RunCompleted':return '迁移已完成';
+    case 'RunFailed':return '执行失败：'+value.message;
+    case 'RunNeedsAttention':return '需要人工核对：'+value.message;
+    case 'RetryScheduled':return '已安排第 '+value.attempt+' 次尝试';
+    case 'ReconciliationRequired':return '正在核对上次操作是否已经提交';
+    case 'OperationResolved':return '已保存人工核对结论';
+    default:return name||'执行记录';
+  }
+}
+function filesText(files){
+  const lines=[];
+  for(const directory of ['a','b']){
+    const entries=files[directory]||[];
+    lines.push(directory+'/ '+(directory==='a'&&!files.a_exists?'（不存在）':entries.length?'':'（空或尚未创建）'));
+    for(const entry of entries)lines.push('  '+entry.path+(entry.directory?'/':'  · '+(entry.bytes?.length||0)+' 字节'));
+  }
+  return lines.join('\n');
+}
+function render(state){
+  if(!state)return;
+  lastState=state;
+  const status=statusOf(state),run=state.run,pending=!!state.next_command;
+  if(run&&status!=='Completed')el('target').value=run.target;
+  el('revision').textContent=state.version;
+  el('path').textContent='测试数据目录：'+state.data_dir;
+  el('sql-version').textContent='SQLite 版本 '+state.sql_version;
+  el('status').textContent=pending&&['Failed','Paused','Cancelled'].includes(status)?'正在更新运行状态，等待执行':statusNames[status]||'没有进行中的迁移';
+  document.querySelectorAll('[data-v]').forEach(node=>node.classList.toggle('active',Number(node.dataset.v)<=Number(state.version.slice(1))));
+  el('schema').textContent=state.schema.filter(item=>item.name!=='_n2x_receipts').map(item=>item.sql).join('\n\n')||'尚未创建业务表';
+  el('run').textContent=pretty({run:run?{id:run.run,status:run.status,current:run.current,target:run.target,step:run.step,confirmed:run.progress.confirmed,last_error:run.last_error}:null,next_command:state.next_command?{id:state.next_command.id,type:Object.keys(state.next_command.kind)[0]}:null});
+  el('files').textContent=filesText(state.files);
+  el('errors').textContent=state.errors.length?state.errors.map(error=>error.code+'\n'+error.message).join('\n\n'):'暂无错误记录';
+  const stopped=['Failed','NeedsAttention','Cancelled','Paused'].includes(status);
+  el('current-item').textContent=status==='Completed'?'本次迁移已完成':run?.step?stepName(run.step):pending?'准备或确认迁移进度':'当前没有正在执行的业务项';
+  el('progress').textContent=run?'本次目标 '+run.target+'；已确认读取 '+run.progress.confirmed.read+' 条，写入 '+run.progress.confirmed.written+' 条。':'可以自动迁移，或先准备后逐项执行。';
+  el('hint').textContent=run&&status!=='Completed'&&!state.executor_loaded?'已找到保存的任务，原目标为 '+run.target+'。点击“准备逐项迁移”加载已有进度。':status==='NeedsAttention'?'上次操作是否提交尚未确认，不能直接重试。请先核对实际数据；本演示网页未提供人工核对结论的提交入口。':stopped&&!pending?'当前任务已停止。查看错误原因；排除故障后，在“测试失败与重启恢复”中准备重试，再继续执行。':pending?'已准备好目标 '+run.target+'。点击“完成下一项”逐项观察，或自动迁移到同一目标。':state.version==='v3'?'已到 v3。可以在下方清空演示数据重新观察，也可以请求 v1 / v2 检查旧版本请求如何报错。':'选择一个目标自动迁移，或通过逐项操作来观察每个业务项。';
+  el('fault-status').textContent=state.fault_armed?'测试故障已安排，等待下一次 v2 写入。':!['v0','v1'].includes(state.version)?'v2 已完成；要重新测试，请先清空演示数据回到 v0。':'每次点击仅影响一次写入。';
+  const root=el('tables');root.replaceChildren();
+  for(const [name,table] of Object.entries(state.tables)){
+    const heading=document.createElement('h3');heading.textContent=name;root.append(heading);
+    const element=document.createElement('table'),head=element.createTHead().insertRow();
+    for(const column of table.columns){const cell=document.createElement('th');cell.textContent=column;head.append(cell)}
+    for(const row of table.rows){const line=element.insertRow();for(const column of table.columns){const cell=line.insertCell();cell.textContent=row[column]??'NULL'}}
+    root.append(element);
+  }
+  if(!root.children.length)root.textContent='v0：JSON 数据尚未导入';
+  const events=state.events?.Events?.items||[];el('events').replaceChildren();
+  for(const event of events.slice().reverse()){
+    const row=document.createElement('div');row.className='event';
+    const sequence=document.createElement('span');sequence.textContent='#'+event.sequence;
+    const body=document.createElement('span');body.textContent=noticeText(event.notice.kind);
+    row.append(sequence,body);el('events').append(row);
+  }
+  if(!events.length)el('events').textContent='准备或加载任务后，这里会显示该任务已保存的执行记录。';
+  showError(run?.last_error);
+  updateControls();
+}
+async function act(action,body={}){
+  if(busy)return;
+  busy=true;updateControls();
+  try{
+    const response=await fetch('/api/'+action,{method:'POST',headers:{'Content-Type':'application/json'},body:pretty(body)});
+    const result=await response.json();render(result.state);
+    const failure=result.error||(action==='resume'&&result.state?.next_command?null:result.state?.run?.last_error);showError(failure);
+    if(!failure){
+      if(action==='reopen')el('hint').textContent='已模拟重启，数据和已保存进度均保留。若任务尚未完成，请选择原目标并点击“准备逐项迁移”。';
+      if(action==='resume')el('hint').textContent='已允许继续。点击“完成下一项”，或自动迁移到原来的目标 '+result.state.run.target+'。';
+      if(action==='fault')el('hint').textContent='已安排一次 v2 写入失败。接下来迁移到 v2 或 v3，观察报错及版本停留在 v1。';
+    }
+  }catch(error){showError({message:String(error)})}
+  finally{busy=false;updateControls()}
+}
+function resetLab(){if(confirm('清空本测试目录中的数据库、迁移进度和日志，并重新生成初始 JSON 与 a 目录，回到 v0？'))act('reset')}
+updateControls();
+fetch('/api/state').then(response=>response.json()).then(result=>{render(result.state);if(result.error)showError(result.error)}).catch(error=>showError({message:'无法读取测试服务：'+error}));
+</script>
+</html>
